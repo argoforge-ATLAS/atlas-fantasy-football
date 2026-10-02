@@ -78,13 +78,21 @@ def _ordinal(n: int) -> str:
     return f"{n}{suffix}"
 
 
+# Statuses that mean "don't start this guy," checked everywhere we
+# touch injury status - defined once, up top, so every endpoint uses
+# the exact same rule.
+BAD_STATUSES = {"Out", "Doubtful", "IR", "PUP", "Suspended"}
+
+
 def _player_brief(players: dict, player_id: str) -> dict:
     p = players.get(player_id, {})
+    injury_status = p.get("injury_status")
     return {
         "name": _player_name(players, player_id),
         "position": p.get("position"),
         "team": p.get("team"),
-        "injury_status": p.get("injury_status"),
+        "injury_status": injury_status,
+        "bad_injury": injury_status in BAD_STATUSES,
         "depth_chart_order": p.get("depth_chart_order"),
     }
 
@@ -134,8 +142,6 @@ SLOT_ELIGIBILITY = {
     "SUPER_FLEX": {"QB", "RB", "WR", "TE"},
     "DEF": {"DEF"},
 }
-
-BAD_STATUSES = {"Out", "Doubtful", "IR", "PUP", "Suspended"}
 
 
 def _build_player_pool(league_id: str):
@@ -275,7 +281,7 @@ def get_recommendations(league_id: str):
 
     # Handle must-sit (injured/etc.) starters first, then point-based upgrades.
     def is_bad(p):
-        return p.get("injury_status") in BAD_STATUSES
+        return p.get("bad_injury", False)
 
     ordered_starters = sorted(starters, key=lambda s: (not is_bad(s),))
 
@@ -283,7 +289,9 @@ def get_recommendations(league_id: str):
         eligible_positions = SLOT_ELIGIBILITY.get(starter.get("slot"), {starter.get("position")})
         candidates = [
             b for b in bench
-            if b["id"] not in used_bench_ids and b.get("position") in eligible_positions
+            if b["id"] not in used_bench_ids
+            and b.get("position") in eligible_positions
+            and not is_bad(b)  # never recommend starting an injured/Out player
         ]
         if not candidates:
             continue
@@ -358,6 +366,8 @@ def get_weekly_matchups(league_id: str):
             "matchup_label": p.get("matchup_label"),
             "matchup_detail": p.get("matchup_detail"),
             "recent_avg_points": p.get("recent_avg_points"),
+            "injury_status": p.get("injury_status"),
+            "bad_injury": p.get("bad_injury"),
         }
 
     return {

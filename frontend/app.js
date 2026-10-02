@@ -52,6 +52,15 @@ const MATCHUP_CHIP_CLASS = {
   "Good matchup": "good",
 };
 
+// A red "OUT"/"Questionable"/etc. badge whenever Sleeper reports a
+// non-healthy status - shown everywhere a player's name appears, so
+// an injured guy is never silently recommended.
+function injuryBadge(player) {
+  if (!player.injury_status) return "";
+  const cls = player.bad_injury ? "label-weakness" : "label-average";
+  return ` <span class="${cls}">${player.injury_status}</span>`;
+}
+
 // Renders the next few weeks' opponents as small colored chips -
 // green = good matchup, red = tough, gray = average or unknown yet.
 function matchupChips(upcoming) {
@@ -86,7 +95,7 @@ async function loadLeagueView(leagueId) {
           : '<span class="hint">not enough data yet</span>';
         return `
           <div class="player-row">
-            <span><strong>${p.name}</strong></span>
+            <span><strong>${p.name}</strong>${injuryBadge(p)}</span>
             <span class="pos">${p.position} vs ${p.opponent}</span>
             <span class="hint">${label}</span>
           </div>`;
@@ -129,7 +138,7 @@ async function loadRecommendations(leagueId) {
       const prod = w.recent_avg_points !== null ? `${w.recent_avg_points} pts/gm` : "no recent stats";
       const fc = w.fantasycalc_value !== null ? `FC value ${w.fantasycalc_value}` : "unranked";
       const chips = matchupChips(w.upcoming_matchups);
-      return `<div class="player-row"><span>${w.name}</span><span class="pos">${w.position || "?"} · ${prod} · ${fc}</span>${chips}</div>`;
+      return `<div class="player-row"><span>${w.name}${injuryBadge(w)}</span><span class="pos">${w.position || "?"} · ${prod} · ${fc}</span>${chips}</div>`;
     }).join("");
     html += "</div>";
 
