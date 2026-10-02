@@ -54,6 +54,13 @@ def get_trending_adds(lookback_hours: int = 24, limit: int = 50):
     return _get(f"/players/nfl/trending/add?lookback_hours={lookback_hours}&limit={limit}")
 
 
+def get_transactions(league_id: str, round_week: int):
+    """All waiver/free-agent/trade transactions for one week ('round')
+    of a league - used to figure out which players have ever touched
+    the waiver wire."""
+    return _get(f"/league/{league_id}/transactions/{round_week}")
+
+
 def get_week_stats(season: str, week: int) -> dict:
     """
     Raw stat totals for every player for one completed week, e.g.

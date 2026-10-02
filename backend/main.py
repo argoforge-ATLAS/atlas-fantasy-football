@@ -25,7 +25,16 @@ import scoring
 import fantasycalc_client as fantasycalc
 import nfl_schedule
 import defense_rankings
+import keeper_eligibility
 from config import LEAGUES, SLEEPER_USERNAME
+
+# DickMelt Fantasies has a house rule: a player keeps keeper
+# eligibility for as long as they've never touched the waiver wire,
+# however they got onto a roster (draft or trade). Matched by the
+# league's actual Sleeper name, not league order in config.py, so a
+# reordering or ID change can't silently flip which league this
+# applies to.
+KEEPER_RULE_LEAGUE_NAMES = {"DickMelt Fantasies"}
 
 app = FastAPI(title="Atlas Fantasy Football - Lineup HQ")
 
@@ -375,6 +384,53 @@ def get_weekly_matchups(league_id: str):
         "label": _league_lookup[league_id],
         "week": state.get("week"),
         "players": [trim(p) for p in starters + bench if p.get("position") in defense_rankings.RELEVANT_POSITIONS],
+    }
+
+
+DROP_CANDIDATE_MAX_PTS = 4.0  # below this recent avg, worth a second look
+
+
+@app.get("/api/leagues/{league_id}/drop-candidates")
+def get_drop_candidates(league_id: str):
+    """
+    Bench players producing little enough that they're worth
+    reconsidering for the waiver wire. In DickMelt Fantasies, players
+    who are still keeper-eligible (never touched waivers, however they
+    got onto your roster) are flagged rather than suggested outright -
+    dropping them costs that eligibility for good.
+    """
+    if league_id not in _league_lookup:
+        raise HTTPException(404, "Unknown league")
+
+    league_info, starters, bench, waiver_candidates = _build_player_pool(league_id)
+
+    enforce_keeper_rule = league_info.get("name") in KEEPER_RULE_LEAGUE_NAMES
+    keeper_eligible_ids = set()
+    if enforce_keeper_rule:
+        bench_ids = {b["id"] for b in bench}
+        keeper_eligible_ids = keeper_eligibility.get_keeper_eligible_ids(league_id, bench_ids)
+
+    candidates = []
+    for b in bench:
+        pts = b.get("recent_avg_points")
+        if pts is not None and pts >= DROP_CANDIDATE_MAX_PTS:
+            continue
+        candidates.append({
+            "name": b["name"],
+            "position": b.get("position"),
+            "recent_avg_points": pts,
+            "injury_status": b.get("injury_status"),
+            "bad_injury": b.get("bad_injury"),
+            "keeper_eligible": enforce_keeper_rule and b["id"] in keeper_eligible_ids,
+        })
+
+    candidates.sort(key=lambda c: c["recent_avg_points"] if c["recent_avg_points"] is not None else -1)
+
+    return {
+        "league_id": league_id,
+        "label": _league_lookup[league_id],
+        "enforce_keeper_rule": enforce_keeper_rule,
+        "candidates": candidates,
     }
 
 

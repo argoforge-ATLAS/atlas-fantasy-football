@@ -77,6 +77,7 @@ async function loadLeagueView(leagueId) {
   content.innerHTML = '<p class="loading">Loading...</p>';
   loadRecommendations(leagueId);
   loadTeamNeeds(leagueId);
+  loadDropCandidates(leagueId);
   try {
     const data = await fetchJSON(`/api/leagues/${leagueId}/matchups`);
 
@@ -153,6 +154,37 @@ loadLeagues().catch(err => {
 });
 
 const teamNeedsOutput = document.getElementById("teamNeedsOutput");
+
+const dropCandidatesOutput = document.getElementById("dropCandidatesOutput");
+
+async function loadDropCandidates(leagueId) {
+  dropCandidatesOutput.innerHTML = '<p class="loading">Loading...</p>';
+  try {
+    const data = await fetchJSON(`/api/leagues/${leagueId}/drop-candidates`);
+    if (!data.candidates.length) {
+      dropCandidatesOutput.innerHTML = "<p>Nothing standing out as droppable right now.</p>";
+      return;
+    }
+    let html = "";
+    if (data.enforce_keeper_rule) {
+      html += '<p class="hint">Keeper-eligible players are flagged - dropping them costs that eligibility for good.</p>';
+    }
+    html += '<div class="player-list">';
+    html += data.candidates.map(c => {
+      const prod = c.recent_avg_points !== null ? `${c.recent_avg_points} pts/gm` : "no recent production";
+      const keeperBadge = c.keeper_eligible ? ' <span class="label-keeper">Keeper eligible</span>' : "";
+      return `
+        <div class="player-row">
+          <span><strong>${c.name}</strong>${injuryBadge(c)}${keeperBadge}</span>
+          <span class="pos">${c.position || "?"} · ${prod}</span>
+        </div>`;
+    }).join("");
+    html += "</div>";
+    dropCandidatesOutput.innerHTML = html;
+  } catch (err) {
+    dropCandidatesOutput.innerHTML = `<p class="error">Couldn't load drop candidates: ${err.message}</p>`;
+  }
+}
 
 async function loadTeamNeeds(leagueId) {
   teamNeedsOutput.innerHTML = '<p class="loading">Loading...</p>';
