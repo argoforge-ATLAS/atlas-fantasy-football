@@ -7,6 +7,8 @@ Serves:
   - GET /api/leagues/{league_id}/matchup  -> this week: you vs your opponent
   - /                                      -> the frontend (static files)
 """
+import json
+
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -132,15 +134,7 @@ def get_matchup(league_id: str):
     }
 
 
-class AdviceRequest(BaseModel):
-    notes: str = ""
-
-
-@app.post("/api/leagues/{league_id}/advice")
-def get_advice(league_id: str, body: AdviceRequest):
-    if league_id not in _league_lookup:
-        raise HTTPException(404, "Unknown league")
-
+def _build_context(league_id: str) -> dict:
     league_info = sleeper.get_league(league_id)
     my_roster, all_rosters, _ = _find_my_roster(league_id)
     players = sleeper.get_players_cached()
@@ -166,7 +160,7 @@ def get_advice(league_id: str, body: AdviceRequest):
         if len(waiver_candidates) >= 15:
             break
 
-    context = {
+    return {
         "league_name": league_info.get("name"),
         "scoring_settings": league_info.get("scoring_settings"),
         "roster_positions": league_info.get("roster_positions"),
@@ -175,6 +169,39 @@ def get_advice(league_id: str, body: AdviceRequest):
         "top_waiver_candidates": waiver_candidates,
     }
 
+
+class AdviceRequest(BaseModel):
+    notes: str = ""
+
+
+@app.get("/api/leagues/{league_id}/advice-prompt")
+def get_advice_prompt(league_id: str):
+    """
+    No AI call, no API key needed. Returns a ready-to-paste prompt
+    (your real roster/league data) that you can hand to any Claude
+    chat to get start/sit and waiver advice - using the Claude
+    subscription you already pay for instead of a separate paid API.
+    """
+    if league_id not in _league_lookup:
+        raise HTTPException(404, "Unknown league")
+
+    context = _build_context(league_id)
+    prompt = (
+        "I need fantasy football start/sit and waiver wire advice for my team, "
+        "based on this real data. Be specific and tie it to my league's actual scoring/roster rules "
+        "(don't give generic PPR advice if my settings differ).\n\n"
+        f"```json\n{json.dumps(context, indent=2)}\n```\n"
+    )
+    return {"league_id": league_id, "prompt": prompt}
+
+
+@app.post("/api/leagues/{league_id}/advice")
+def get_advice(league_id: str, body: AdviceRequest):
+    """Optional automatic version - only works if ANTHROPIC_API_KEY is set."""
+    if league_id not in _league_lookup:
+        raise HTTPException(404, "Unknown league")
+
+    context = _build_context(league_id)
     advice_text = advisor.get_weekly_advice(context, human_notes=body.notes)
     return {"league_id": league_id, "advice": advice_text}
 

@@ -84,27 +84,37 @@ refreshBtn.onclick = () => activeLeagueId && loadLeagueView(activeLeagueId);
 
 const adviceBtn = document.getElementById("adviceBtn");
 const adviceOutput = document.getElementById("adviceOutput");
-const notesInput = document.getElementById("notesInput");
 
 adviceBtn.onclick = async () => {
   if (!activeLeagueId) return;
   adviceBtn.disabled = true;
-  adviceBtn.textContent = "Thinking...";
+  adviceBtn.textContent = "Preparing...";
   adviceOutput.innerHTML = "";
   try {
-    const res = await fetch(`/api/leagues/${activeLeagueId}/advice`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ notes: notesInput.value }),
-    });
+    const res = await fetch(`/api/leagues/${activeLeagueId}/advice-prompt`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    adviceOutput.innerHTML = `<p class="advice-text">${data.advice.replace(/\n/g, "<br>")}</p>`;
+
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(data.prompt);
+      copied = true;
+    } catch (clipErr) {
+      copied = false;
+    }
+
+    if (copied) {
+      adviceOutput.innerHTML = `<p class="advice-text">Copied! Paste it into a Claude chat to get your advice.</p>`;
+    } else {
+      // Clipboard access can fail (e.g. no HTTPS) - fall back to a selectable textbox.
+      adviceOutput.innerHTML = `<p>Couldn't auto-copy - select all the text below and copy it manually:</p>
+        <textarea readonly rows="6" style="width:100%;">${data.prompt}</textarea>`;
+    }
   } catch (err) {
-    adviceOutput.innerHTML = `<p class="error">Couldn't get advice: ${err.message}</p>`;
+    adviceOutput.innerHTML = `<p class="error">Couldn't prepare the data: ${err.message}</p>`;
   } finally {
     adviceBtn.disabled = false;
-    adviceBtn.textContent = "Get start/sit & waiver advice";
+    adviceBtn.textContent = "Copy data for Claude";
   }
 };
 
