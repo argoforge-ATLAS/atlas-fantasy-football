@@ -40,29 +40,40 @@ async function selectLeague(leagueId) {
   await loadLeagueView(leagueId);
 }
 
+const MATCHUP_LABEL_CLASS = {
+  "Tough matchup": "label-weakness",
+  "Average matchup": "label-average",
+  "Good matchup": "label-strength",
+};
+
 async function loadLeagueView(leagueId) {
   content.innerHTML = '<p class="loading">Loading...</p>';
   loadRecommendations(leagueId);
   loadTeamNeeds(leagueId);
   try {
-    const matchup = await fetchJSON(`/api/leagues/${leagueId}/matchup`);
+    const data = await fetchJSON(`/api/leagues/${leagueId}/matchups`);
 
-    let html = "";
+    let html = `<div class="card"><h2>Week ${data.week || ""} Matchups</h2>`;
+    html += '<p class="hint">Your roster\'s real-life opponents this week, and how tough each defense has been against that position recently.</p>';
 
-    html += `<div class="card"><h2>Week ${matchup.week || ""} Scoreboard</h2>`;
-    if (matchup.message) {
-      html += `<p>${matchup.message}</p>`;
+    const withMatchup = data.players.filter(p => p.opponent);
+    if (!withMatchup.length) {
+      html += "<p>No matchup data yet - check back once the week's schedule is set.</p>";
     } else {
-      html += `
-        <p class="hint">Updates live once games kick off - 0 just means they haven't started.</p>
-        <div class="matchup-row">
-          <span>${matchup.me.team_name} <span class="hint">(you)</span></span>
-          <span class="score">${matchup.me.points} pts</span>
-        </div>
-        <div class="matchup-row">
-          <span>${matchup.opponent.team_name}</span>
-          <span class="score">${matchup.opponent.points} pts</span>
-        </div>`;
+      html += '<div class="player-list">';
+      html += withMatchup.map(p => {
+        const labelClass = MATCHUP_LABEL_CLASS[p.matchup_label] || "label-average";
+        const label = p.matchup_label
+          ? `<span class="${labelClass}">${p.matchup_label}</span>`
+          : '<span class="hint">not enough data yet</span>';
+        return `
+          <div class="player-row">
+            <span><strong>${p.name}</strong></span>
+            <span class="pos">${p.position} vs ${p.opponent}</span>
+            <span class="hint">${label}</span>
+          </div>`;
+      }).join("");
+      html += "</div>";
     }
     html += "</div>";
 
@@ -99,7 +110,10 @@ async function loadRecommendations(leagueId) {
     html += data.top_waivers.map(w => {
       const prod = w.recent_avg_points !== null ? `${w.recent_avg_points} pts/gm` : "no recent stats";
       const fc = w.fantasycalc_value !== null ? `FC value ${w.fantasycalc_value}` : "unranked";
-      return `<div class="player-row"><span>${w.name}</span><span class="pos">${w.position || "?"} · ${prod} · ${fc}</span></div>`;
+      const matchup = w.opponent
+        ? ` · vs ${w.opponent}${w.matchup_label ? " (" + w.matchup_label + ")" : ""}`
+        : "";
+      return `<div class="player-row"><span>${w.name}</span><span class="pos">${w.position || "?"} · ${prod} · ${fc}${matchup}</span></div>`;
     }).join("");
     html += "</div>";
 

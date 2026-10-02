@@ -4,21 +4,27 @@ Atlas Fantasy Football - Lineup HQ backend.
 Serves:
   - GET /api/leagues                        -> basic info for both leagues
   - GET /api/leagues/{league_id}/lineup     -> your roster, starters vs bench
-  - GET /api/leagues/{league_id}/matchup    -> this week: you vs your opponent
+  - GET /api/leagues/{league_id}/matchups   -> this week's real NFL opponent
+        for each of your players + how tough that defense has been at
+        their position (from raw stats + a free schedule source)
   - GET /api/leagues/{league_id}/recommendations -> start/sit + waiver suggestions,
         computed in Python from real recent performance under THIS league's
         actual scoring rules. No AI call, no external chat step.
+  - GET /api/leagues/{league_id}/team-needs -> your team's strengths/weaknesses
+        by position vs. the rest of your league
   - /                                        -> the frontend (static files)
 """
 import json
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 import sleeper_client as sleeper
 import scoring
 import fantasycalc_client as fantasycalc
+import nfl_schedule
+import defense_rankings
 from config import LEAGUES, SLEEPER_USERNAME
 
 app = FastAPI(title="Atlas Fantasy Football - Lineup HQ")
@@ -29,6 +35,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def no_store_api_responses(request: Request, call_next):
+    """Lineup/roster data changes on Sleeper's side at any moment (e.g.
+    you set a new starter from your phone), so API responses should
+    never be cached by the browser - always fetch fresh."""
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 _league_lookup = {l["id"]: l["label"] for l in LEAGUES}
 
@@ -51,6 +68,14 @@ def _player_name(players: dict, player_id: str) -> str:
     if not p:
         return player_id
     return p.get("full_name") or f"{p.get('first_name', '')} {p.get('last_name', '')}".strip()
+
+
+def _ordinal(n: int) -> str:
+    if 10 <= n % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
 
 
 def _player_brief(players: dict, player_id: str) -> dict:
@@ -98,46 +123,6 @@ def get_lineup(league_id: str):
     }
 
 
-@app.get("/api/leagues/{league_id}/matchup")
-def get_matchup(league_id: str):
-    if league_id not in _league_lookup:
-        raise HTTPException(404, "Unknown league")
-
-    state = sleeper.get_nfl_state()
-    week = state["week"]
-
-    my_roster, all_rosters, users_by_id = _find_my_roster(league_id)
-    matchups = sleeper.get_matchups(league_id, week)
-
-    roster_id_to_owner = {r["roster_id"]: r["owner_id"] for r in all_rosters}
-
-    my_matchup = next((m for m in matchups if m["roster_id"] == my_roster["roster_id"]), None)
-    if my_matchup is None:
-        return {"league_id": league_id, "label": _league_lookup[league_id], "week": week, "message": "No matchup found (bye week or season not started)"}
-
-    opponent = next(
-        (m for m in matchups
-         if m["matchup_id"] == my_matchup["matchup_id"] and m["roster_id"] != my_roster["roster_id"]),
-        None,
-    )
-
-    def team_name(roster_id):
-        owner_id = roster_id_to_owner.get(roster_id)
-        user = users_by_id.get(owner_id, {})
-        return user.get("metadata", {}).get("team_name") or user.get("display_name") or "Unknown"
-
-    return {
-        "league_id": league_id,
-        "label": _league_lookup[league_id],
-        "week": week,
-        "me": {"team_name": team_name(my_roster["roster_id"]), "points": my_matchup.get("points", 0)},
-        "opponent": {
-            "team_name": team_name(opponent["roster_id"]) if opponent else "TBD",
-            "points": opponent.get("points", 0) if opponent else 0,
-        },
-    }
-
-
 # Which real positions can fill each roster slot type. Standard
 # Sleeper convention - tweak here if your league's flex rules differ.
 SLOT_ELIGIBILITY = {
@@ -180,12 +165,30 @@ def _build_player_pool(league_id: str):
         num_qbs=max(num_qbs, 1), num_teams=num_teams, ppr=ppr, is_dynasty=False
     )
 
+    # This week's real NFL schedule, and how tough each defense has
+    # been against each position recently (both independent of
+    # Sleeper/FantasyCalc - computed from raw stats + ESPN's schedule).
+    this_week_schedule = nfl_schedule.get_week_schedule(season, current_week)
+    lookback_weeks = scoring.get_recent_weeks(current_week)
+    defense_ranks = defense_rankings.get_defense_rankings(season, lookback_weeks, scoring_settings)
+
     def enrich(pid):
         brief = _player_brief(players, pid)
         brief["id"] = pid
         brief["recent_avg_points"] = scoring.recent_avg_points(pid, season, current_week, scoring_settings)
         fc = fc_values.get(pid)
         brief["fantasycalc_value"] = fc["value"] if fc else None
+
+        team = brief.get("team")
+        position = brief.get("position")
+        opponent = this_week_schedule.get(team) if team else None
+        brief["opponent"] = opponent
+        brief["matchup_label"] = None
+        if opponent and position in defense_rankings.RELEVANT_POSITIONS:
+            rank_info = defense_ranks.get(opponent, {}).get(position)
+            if rank_info:
+                brief["matchup_label"] = defense_rankings.matchup_label(rank_info["rank"], rank_info["out_of"])
+                brief["matchup_detail"] = f"{opponent} allows the {_ordinal(rank_info['rank'])}-most {position} points in the league"
         return brief
 
     starters = [enrich(pid) for pid in starter_ids]
@@ -307,6 +310,40 @@ def get_recommendations(league_id: str):
         "label": _league_lookup[league_id],
         "swap_suggestions": swap_suggestions,
         "top_waivers": ranked_waivers,
+    }
+
+
+@app.get("/api/leagues/{league_id}/matchups")
+def get_weekly_matchups(league_id: str):
+    """
+    This week's real-life opponent for every player on your roster,
+    plus how tough that opponent's defense has been against that
+    position recently - e.g. 'Khalif Raymond vs. LAR - Tough matchup'.
+    Computed from raw stats + a free NFL schedule source, independent
+    of Sleeper and FantasyCalc.
+    """
+    if league_id not in _league_lookup:
+        raise HTTPException(404, "Unknown league")
+
+    league_info, starters, bench, _ = _build_player_pool(league_id)
+    state = sleeper.get_nfl_state()
+
+    def trim(p):
+        return {
+            "name": p["name"],
+            "position": p.get("position"),
+            "team": p.get("team"),
+            "opponent": p.get("opponent"),
+            "matchup_label": p.get("matchup_label"),
+            "matchup_detail": p.get("matchup_detail"),
+            "recent_avg_points": p.get("recent_avg_points"),
+        }
+
+    return {
+        "league_id": league_id,
+        "label": _league_lookup[league_id],
+        "week": state.get("week"),
+        "players": [trim(p) for p in starters + bench if p.get("position") in defense_rankings.RELEVANT_POSITIONS],
     }
 
 
