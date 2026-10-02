@@ -94,10 +94,11 @@ async function loadLeagueView(leagueId) {
         const label = p.matchup_label
           ? `<span class="${labelClass}">${p.matchup_label}</span>`
           : '<span class="hint">not enough data yet</span>';
+        const prod = p.recent_avg_points !== null ? `${p.recent_avg_points} pts/gm` : "no recent production";
         return `
           <div class="player-row">
             <span><strong>${p.name}</strong>${injuryBadge(p)}</span>
-            <span class="pos">${p.position} vs ${p.opponent}</span>
+            <span class="pos">${p.position} vs ${p.opponent} · ${prod}</span>
             <span class="hint">${label}</span>
           </div>`;
       }).join("");
