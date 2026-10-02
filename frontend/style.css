@@ -164,3 +164,7 @@ main { padding: 1rem 1.25rem; }
   line-height: 1.5;
   white-space: pre-wrap;
 }
+
+.label-strength { color: var(--accent); font-weight: 600; }
+.label-weakness { color: #f87171; font-weight: 600; }
+.label-average { color: var(--muted); font-weight: 600; }

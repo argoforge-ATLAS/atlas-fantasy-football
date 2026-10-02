@@ -43,38 +43,28 @@ async function selectLeague(leagueId) {
 async function loadLeagueView(leagueId) {
   content.innerHTML = '<p class="loading">Loading...</p>';
   loadRecommendations(leagueId);
+  loadTeamNeeds(leagueId);
   try {
-    const [matchup, lineup] = await Promise.all([
-      fetchJSON(`/api/leagues/${leagueId}/matchup`),
-      fetchJSON(`/api/leagues/${leagueId}/lineup`),
-    ]);
+    const matchup = await fetchJSON(`/api/leagues/${leagueId}/matchup`);
 
     let html = "";
 
-    html += `<div class="card"><h2>This Week - Week ${matchup.week || ""}</h2>`;
+    html += `<div class="card"><h2>Week ${matchup.week || ""} Scoreboard</h2>`;
     if (matchup.message) {
       html += `<p>${matchup.message}</p>`;
     } else {
       html += `
-        <p class="hint">Live scores - both sides show 0 until games for the week are played.</p>
+        <p class="hint">Updates live once games kick off - 0 just means they haven't started.</p>
         <div class="matchup-row">
-          <span>You (${matchup.me.team_name})</span>
+          <span>${matchup.me.team_name} <span class="hint">(you)</span></span>
           <span class="score">${matchup.me.points} pts</span>
         </div>
         <div class="matchup-row">
-          <span>Opponent (${matchup.opponent.team_name})</span>
+          <span>${matchup.opponent.team_name}</span>
           <span class="score">${matchup.opponent.points} pts</span>
         </div>`;
     }
     html += "</div>";
-
-    html += '<div class="card"><h2>Starters</h2><div class="player-list">';
-    html += lineup.starters.map(p => `<div class="player-row"><span>${p.name}</span><span class="pos">${p.position || ""}${p.team ? " · " + p.team : ""}</span></div>`).join("");
-    html += "</div></div>";
-
-    html += '<div class="card"><h2>Bench</h2><div class="player-list">';
-    html += lineup.bench.map(p => `<div class="player-row"><span>${p.name}</span><span class="pos">${p.position || ""}${p.team ? " · " + p.team : ""}</span></div>`).join("");
-    html += "</div></div>";
 
     content.innerHTML = html;
   } catch (err) {
@@ -122,3 +112,27 @@ async function loadRecommendations(leagueId) {
 loadLeagues().catch(err => {
   content.innerHTML = `<p class="error">Couldn't load leagues: ${err.message}</p>`;
 });
+
+const teamNeedsOutput = document.getElementById("teamNeedsOutput");
+
+async function loadTeamNeeds(leagueId) {
+  teamNeedsOutput.innerHTML = '<p class="loading">Loading...</p>';
+  try {
+    const data = await fetchJSON(`/api/leagues/${leagueId}/team-needs`);
+    if (!data.needs.length) {
+      teamNeedsOutput.innerHTML = "<p>Not enough recent stats yet to judge this.</p>";
+      return;
+    }
+    const labelClass = { Strength: "label-strength", Weakness: "label-weakness", Average: "label-average" };
+    let html = '<div class="player-list">';
+    html += data.needs.map(n => `
+      <div class="player-row">
+        <span><strong>${n.position}</strong> <span class="${labelClass[n.label]}">${n.label}</span></span>
+        <span class="pos">You: ${n.my_avg} pts/gm · League avg: ${n.league_avg}</span>
+      </div>`).join("");
+    html += "</div>";
+    teamNeedsOutput.innerHTML = html;
+  } catch (err) {
+    teamNeedsOutput.innerHTML = `<p class="error">Couldn't load team needs: ${err.message}</p>`;
+  }
+}

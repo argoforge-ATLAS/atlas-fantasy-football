@@ -310,5 +310,69 @@ def get_recommendations(league_id: str):
     }
 
 
+RELEVANT_POSITIONS = ["QB", "RB", "WR", "TE", "DEF"]
+
+
+@app.get("/api/leagues/{league_id}/team-needs")
+def get_team_needs(league_id: str):
+    """
+    At each position, is your team scoring above or below the REST OF
+    YOUR LEAGUE's average - using real recent performance, not generic
+    rankings. This is the kind of cross-roster analysis Sleeper itself
+    doesn't show you.
+    """
+    if league_id not in _league_lookup:
+        raise HTTPException(404, "Unknown league")
+
+    league_info = sleeper.get_league(league_id)
+    scoring_settings = league_info.get("scoring_settings") or {}
+    state = sleeper.get_nfl_state()
+    season, current_week = state["season"], state["week"]
+
+    my_roster, all_rosters, _ = _find_my_roster(league_id)
+    players = sleeper.get_players_cached()
+
+    league_points_by_position = {pos: [] for pos in RELEVANT_POSITIONS}
+    my_points_by_position = {pos: [] for pos in RELEVANT_POSITIONS}
+
+    for roster in all_rosters:
+        is_me = roster["roster_id"] == my_roster["roster_id"]
+        for pid in (roster.get("players") or []):
+            position = (players.get(pid) or {}).get("position")
+            if position not in RELEVANT_POSITIONS:
+                continue
+            pts = scoring.recent_avg_points(pid, season, current_week, scoring_settings)
+            if pts is None:
+                continue
+            league_points_by_position[position].append(pts)
+            if is_me:
+                my_points_by_position[position].append(pts)
+
+    needs = []
+    for position in RELEVANT_POSITIONS:
+        league_vals = league_points_by_position[position]
+        my_vals = my_points_by_position[position]
+        if not league_vals or not my_vals:
+            continue
+        league_avg = round(sum(league_vals) / len(league_vals), 2)
+        my_avg = round(sum(my_vals) / len(my_vals), 2)
+        diff = round(my_avg - league_avg, 2)
+        if diff > 1.5:
+            label = "Strength"
+        elif diff < -1.5:
+            label = "Weakness"
+        else:
+            label = "Average"
+        needs.append({
+            "position": position,
+            "my_avg": my_avg,
+            "league_avg": league_avg,
+            "diff": diff,
+            "label": label,
+        })
+
+    return {"league_id": league_id, "needs": needs}
+
+
 # Serve the frontend last, so /api/* routes above take priority.
 app.mount("/", StaticFiles(directory="/app/frontend", html=True), name="frontend")
