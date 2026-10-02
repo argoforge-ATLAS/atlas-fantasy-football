@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import sleeper_client as sleeper
 import scoring
+import fantasycalc_client as fantasycalc
 from config import LEAGUES, SLEEPER_USERNAME
 
 app = FastAPI(title="Atlas Fantasy Football - Lineup HQ")
@@ -168,10 +169,23 @@ def _build_player_pool(league_id: str):
     all_ids = my_roster.get("players") or []
     bench_ids = [pid for pid in all_ids if pid not in starter_ids]
 
+    # A second, independent source: FantasyCalc's own player valuations.
+    # Parameters mirror this league's actual settings so the values are
+    # relevant (superflex vs. single-QB, PPR level, league size).
+    roster_positions_raw = league_info.get("roster_positions") or []
+    num_qbs = roster_positions_raw.count("QB") + roster_positions_raw.count("SUPER_FLEX")
+    ppr = scoring_settings.get("rec", 0)
+    num_teams = len(all_rosters) or 10
+    fc_values = fantasycalc.get_values_by_sleeper_id(
+        num_qbs=max(num_qbs, 1), num_teams=num_teams, ppr=ppr, is_dynasty=False
+    )
+
     def enrich(pid):
         brief = _player_brief(players, pid)
         brief["id"] = pid
         brief["recent_avg_points"] = scoring.recent_avg_points(pid, season, current_week, scoring_settings)
+        fc = fc_values.get(pid)
+        brief["fantasycalc_value"] = fc["value"] if fc else None
         return brief
 
     starters = [enrich(pid) for pid in starter_ids]
@@ -275,8 +289,16 @@ def get_recommendations(league_id: str):
 
     def waiver_sort_key(w):
         pts = w.get("recent_avg_points")
-        # Players with real recent points rank above trending-only guesses.
-        return (pts is not None, pts if pts is not None else 0, w.get("add_count_48h", 0))
+        fc_value = w.get("fantasycalc_value")
+        # Rank first by real recent production (Sleeper stats), then by
+        # FantasyCalc's independent market value, then by how many
+        # teams are adding them right now - so a freshly-signed player
+        # with no stat history yet can still surface via the other two.
+        return (
+            pts is not None, pts if pts is not None else 0,
+            fc_value is not None, fc_value if fc_value is not None else 0,
+            w.get("add_count_48h", 0),
+        )
 
     ranked_waivers = sorted(waiver_candidates, key=waiver_sort_key, reverse=True)[:10]
 

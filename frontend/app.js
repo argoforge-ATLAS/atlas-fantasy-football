@@ -51,18 +51,19 @@ async function loadLeagueView(leagueId) {
 
     let html = "";
 
-    html += '<div class="card"><h2>This Week</h2>';
+    html += `<div class="card"><h2>This Week - Week ${matchup.week || ""}</h2>`;
     if (matchup.message) {
       html += `<p>${matchup.message}</p>`;
     } else {
       html += `
+        <p class="hint">Live scores - both sides show 0 until games for the week are played.</p>
         <div class="matchup-row">
-          <span>${matchup.me.team_name}</span>
-          <span class="score">${matchup.me.points}</span>
+          <span>You (${matchup.me.team_name})</span>
+          <span class="score">${matchup.me.points} pts</span>
         </div>
         <div class="matchup-row">
-          <span>${matchup.opponent.team_name}</span>
-          <span class="score">${matchup.opponent.points}</span>
+          <span>Opponent (${matchup.opponent.team_name})</span>
+          <span class="score">${matchup.opponent.points} pts</span>
         </div>`;
     }
     html += "</div>";
@@ -94,16 +95,21 @@ async function loadRecommendations(leagueId) {
     if (data.swap_suggestions.length === 0) {
       html += "<p>No swaps suggested right now - your lineup looks set.</p>";
     } else {
+      html += '<div class="player-list">';
       html += data.swap_suggestions.map(s => `
         <div class="player-row">
-          <span><strong>Start ${s.start}</strong> over ${s.sit} (${s.slot})<br><span class="hint">${s.reason}</span></span>
+          <span><strong>Start ${s.start}</strong></span>
+          <span class="pos">over ${s.sit} (${s.slot})</span>
+          <span class="hint">${s.reason}</span>
         </div>`).join("");
+      html += "</div>";
     }
 
-    html += '<h3 style="margin-top:1.25rem;">Top waiver targets</h3><div class="waiver-list">';
+    html += '<h3 style="margin-top:1.25rem;">Top waiver targets</h3><div class="player-list">';
     html += data.top_waivers.map(w => {
-      const pts = w.recent_avg_points !== null ? `${w.recent_avg_points} pts/gm (last 3 wks)` : `trending (${w.add_count_48h} adds/48h)`;
-      return `<div class="player-row"><span>${w.name} (${w.position || "?"})</span><span class="hint">${pts}</span></div>`;
+      const prod = w.recent_avg_points !== null ? `${w.recent_avg_points} pts/gm` : "no recent stats";
+      const fc = w.fantasycalc_value !== null ? `FC value ${w.fantasycalc_value}` : "unranked";
+      return `<div class="player-row"><span>${w.name}</span><span class="pos">${w.position || "?"} · ${prod} · ${fc}</span></div>`;
     }).join("");
     html += "</div>";
 

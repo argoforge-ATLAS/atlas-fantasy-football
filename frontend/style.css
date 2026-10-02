@@ -109,7 +109,7 @@ main { padding: 1rem 1.25rem; }
 
 .player-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 0.4rem;
 }
 
