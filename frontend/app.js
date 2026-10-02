@@ -175,7 +175,7 @@ async function loadDropCandidates(leagueId) {
       const keeperBadge = c.keeper_eligible ? ' <span class="label-keeper">Keeper eligible</span>' : "";
       return `
         <div class="player-row">
-          <span><strong>${c.name}</strong>${injuryBadge(c)}${keeperBadge}</span>
+          <span><strong>${c.name}</strong>${keeperBadge}</span>
           <span class="pos">${c.position || "?"} · ${prod}</span>
         </div>`;
     }).join("");

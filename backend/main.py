@@ -412,6 +412,11 @@ def get_drop_candidates(league_id: str):
 
     candidates = []
     for b in bench:
+        # Injured/IR players are already explained by their status -
+        # that's not a "should I drop this guy" decision, it's just
+        # where he is right now. Don't clutter this list with them.
+        if b.get("bad_injury"):
+            continue
         pts = b.get("recent_avg_points")
         if pts is not None and pts >= DROP_CANDIDATE_MAX_PTS:
             continue
@@ -419,8 +424,6 @@ def get_drop_candidates(league_id: str):
             "name": b["name"],
             "position": b.get("position"),
             "recent_avg_points": pts,
-            "injury_status": b.get("injury_status"),
-            "bad_injury": b.get("bad_injury"),
             "keeper_eligible": enforce_keeper_rule and b["id"] in keeper_eligible_ids,
         })
 
