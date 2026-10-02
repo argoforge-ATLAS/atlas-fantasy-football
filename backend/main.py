@@ -93,6 +93,14 @@ def _ordinal(n: int) -> str:
 # the exact same rule.
 BAD_STATUSES = {"Out", "Doubtful", "IR", "PUP", "Suspended"}
 
+# Of those, only these are a LONG-TERM roster decision already made
+# (stashed on IR, suspended, etc.) - Out/Doubtful/Questionable are
+# just this week's game-day uncertainty and shouldn't exempt an
+# otherwise-bad player from being flagged as droppable.
+STASH_STATUSES = {"IR", "PUP", "Suspended"}
+
+RELEVANT_POSITIONS = ["QB", "RB", "WR", "TE", "DEF"]
+
 
 def _player_brief(players: dict, player_id: str) -> dict:
     p = players.get(player_id, {})
@@ -388,7 +396,41 @@ def get_weekly_matchups(league_id: str):
     }
 
 
-DROP_CANDIDATE_MAX_PTS = 4.0  # below this recent avg, worth a second look
+def _league_position_averages(league_id: str) -> dict:
+    """Average recent fantasy points at each position, pooled across
+    EVERY roster in the league (not just yours) - the real
+    replacement-level baseline for that position in this league right
+    now, computed fresh each time rather than a hardcoded number per
+    position (a QB's replacement level is nothing like a TE's)."""
+    league_info = sleeper.get_league(league_id)
+    scoring_settings = league_info.get("scoring_settings") or {}
+    state = sleeper.get_nfl_state()
+    season, current_week = state["season"], state["week"]
+    _, all_rosters, _ = _find_my_roster(league_id)
+    players = sleeper.get_players_cached()
+
+    totals = {pos: [] for pos in RELEVANT_POSITIONS}
+    for roster in all_rosters:
+        for pid in (roster.get("players") or []):
+            position = (players.get(pid) or {}).get("position")
+            if position not in RELEVANT_POSITIONS:
+                continue
+            pts = scoring.recent_avg_points(pid, season, current_week, scoring_settings)
+            if pts is not None:
+                totals[position].append(pts)
+
+    return {pos: sum(vals) / len(vals) for pos, vals in totals.items() if vals}
+
+
+# Below this fraction of the league's OWN average at that position,
+# worth a second look. Dynamic and position-relative, rather than one
+# flat number for every position - a QB and a TE don't share a
+# replacement level.
+DROP_CANDIDATE_RATIO = 0.65
+
+# Only used if we don't have a league average yet (e.g. week 1, no
+# stats anywhere) - a safety net, not the real rule.
+FALLBACK_DROP_MAX_PTS = 4.0
 
 # A low scorer whose share of their team's own targets/carries is at
 # or above this (or climbing) likely hasn't converted opportunity into
@@ -417,6 +459,7 @@ def get_drop_candidates(league_id: str):
     state = sleeper.get_nfl_state()
     season, current_week = state["season"], state["week"]
     lookback_weeks = scoring.get_recent_weeks(current_week)
+    league_avgs = _league_position_averages(league_id)
 
     enforce_keeper_rule = league_info.get("name") in KEEPER_RULE_LEAGUE_NAMES
     keeper_eligible_ids = set()
@@ -426,16 +469,21 @@ def get_drop_candidates(league_id: str):
 
     candidates = []
     for b in bench:
-        # Injured/IR players are already explained by their status -
-        # that's not a "should I drop this guy" decision, it's just
-        # where he is right now. Don't clutter this list with them.
-        if b.get("bad_injury"):
-            continue
-        pts = b.get("recent_avg_points")
-        if pts is not None and pts >= DROP_CANDIDATE_MAX_PTS:
+        # A long-term stash (IR/PUP/Suspended) is a decision you've
+        # already made, not a "should I drop this guy" question. But
+        # Out/Doubtful/Questionable is just this week's status - it
+        # shouldn't hide an otherwise-bad player from this list.
+        if b.get("injury_status") in STASH_STATUSES:
             continue
 
         position = b.get("position")
+        league_avg = league_avgs.get(position)
+        threshold = league_avg * DROP_CANDIDATE_RATIO if league_avg is not None else FALLBACK_DROP_MAX_PTS
+
+        pts = b.get("recent_avg_points")
+        if pts is not None and pts >= threshold:
+            continue
+
         opportunity_pct, opportunity_dir = (None, None)
         if position in ("RB", "WR", "TE"):
             opportunity_pct, opportunity_dir = opportunity.opportunity_trend(
@@ -451,6 +499,9 @@ def get_drop_candidates(league_id: str):
             "name": b["name"],
             "position": position,
             "recent_avg_points": pts,
+            "league_avg_at_position": round(league_avg, 2) if league_avg is not None else None,
+            "injury_status": b.get("injury_status"),
+            "bad_injury": b.get("bad_injury"),
             "opportunity_pct": opportunity_pct,
             "opportunity_trend": opportunity_dir,
             "verdict": verdict,
@@ -468,9 +519,6 @@ def get_drop_candidates(league_id: str):
         "enforce_keeper_rule": enforce_keeper_rule,
         "candidates": candidates,
     }
-
-
-RELEVANT_POSITIONS = ["QB", "RB", "WR", "TE", "DEF"]
 
 
 @app.get("/api/leagues/{league_id}/team-needs")

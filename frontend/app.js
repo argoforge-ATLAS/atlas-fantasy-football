@@ -173,6 +173,7 @@ async function loadDropCandidates(leagueId) {
     html += '<div class="player-list">';
     html += data.candidates.map(c => {
       const prod = c.recent_avg_points !== null ? `${c.recent_avg_points} pts/gm` : "no recent production";
+      const vsLeague = c.league_avg_at_position !== null ? ` (league avg ${c.league_avg_at_position})` : "";
       const keeperBadge = c.keeper_eligible ? ' <span class="label-keeper">Keeper eligible</span>' : "";
       const verdictClass = c.verdict === "Hold - role growing" ? "label-strength" : "label-weakness";
       let opportunity = "";
@@ -182,8 +183,8 @@ async function loadDropCandidates(leagueId) {
       }
       return `
         <div class="player-row">
-          <span><strong>${c.name}</strong>${keeperBadge}</span>
-          <span class="pos">${c.position || "?"} · ${prod}${opportunity}</span>
+          <span><strong>${c.name}</strong>${injuryBadge(c)}${keeperBadge}</span>
+          <span class="pos">${c.position || "?"} · ${prod}${vsLeague}${opportunity}</span>
           <span class="${verdictClass}">${c.verdict}</span>
         </div>`;
     }).join("");
