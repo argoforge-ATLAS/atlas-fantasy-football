@@ -59,6 +59,7 @@ def _player_brief(players: dict, player_id: str) -> dict:
         "position": p.get("position"),
         "team": p.get("team"),
         "injury_status": p.get("injury_status"),
+        "depth_chart_order": p.get("depth_chart_order"),
     }
 
 
@@ -91,8 +92,8 @@ def get_lineup(league_id: str):
     return {
         "league_id": league_id,
         "label": _league_lookup[league_id],
-        "starters": [{"id": pid, "name": _player_name(players, pid)} for pid in starters],
-        "bench": [{"id": pid, "name": _player_name(players, pid)} for pid in bench],
+        "starters": [_player_brief(players, pid) for pid in starters],
+        "bench": [_player_brief(players, pid) for pid in bench],
     }
 
 
@@ -187,13 +188,23 @@ def _build_player_pool(league_id: str):
     for r in all_rosters:
         rostered_ids.update(r.get("players") or [])
 
-    trending = sleeper.get_trending_adds(lookback_hours=48, limit=75)
+    # Only consider waiver candidates at positions your league actually
+    # starts (e.g. no kickers if neither league has a K slot).
+    valid_positions = set()
+    for slot in slot_types:
+        valid_positions |= SLOT_ELIGIBILITY.get(slot, {slot})
+
+    trending = sleeper.get_trending_adds(lookback_hours=48, limit=150)
     waiver_candidates = []
     for t in trending:
         pid = t["player_id"]
         if pid in rostered_ids:
             continue
         brief = enrich(pid)
+        if brief.get("position") not in valid_positions:
+            continue
+        # depth_chart_order of 3+ means deep backup, unlikely to play -
+        # still shown, but the frontend can de-emphasize these.
         brief["add_count_48h"] = t.get("count")
         waiver_candidates.append(brief)
         if len(waiver_candidates) >= 20:

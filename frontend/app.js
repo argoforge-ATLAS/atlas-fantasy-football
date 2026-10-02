@@ -67,13 +67,13 @@ async function loadLeagueView(leagueId) {
     }
     html += "</div>";
 
-    html += '<div class="card"><h2>Starters</h2>';
-    html += lineup.starters.map(p => `<div class="player-row"><span>${p.name}</span></div>`).join("");
-    html += "</div>";
+    html += '<div class="card"><h2>Starters</h2><div class="player-list">';
+    html += lineup.starters.map(p => `<div class="player-row"><span>${p.name}</span><span class="pos">${p.position || ""}${p.team ? " · " + p.team : ""}</span></div>`).join("");
+    html += "</div></div>";
 
-    html += '<div class="card"><h2>Bench</h2>';
-    html += lineup.bench.map(p => `<div class="player-row"><span>${p.name}</span></div>`).join("");
-    html += "</div>";
+    html += '<div class="card"><h2>Bench</h2><div class="player-list">';
+    html += lineup.bench.map(p => `<div class="player-row"><span>${p.name}</span><span class="pos">${p.position || ""}${p.team ? " · " + p.team : ""}</span></div>`).join("");
+    html += "</div></div>";
 
     content.innerHTML = html;
   } catch (err) {
@@ -100,11 +100,12 @@ async function loadRecommendations(leagueId) {
         </div>`).join("");
     }
 
-    html += '<h3 style="margin-top:1.25rem;">Top waiver targets</h3>';
+    html += '<h3 style="margin-top:1.25rem;">Top waiver targets</h3><div class="waiver-list">';
     html += data.top_waivers.map(w => {
       const pts = w.recent_avg_points !== null ? `${w.recent_avg_points} pts/gm (last 3 wks)` : `trending (${w.add_count_48h} adds/48h)`;
       return `<div class="player-row"><span>${w.name} (${w.position || "?"})</span><span class="hint">${pts}</span></div>`;
     }).join("");
+    html += "</div>";
 
     adviceOutput.innerHTML = html;
   } catch (err) {
