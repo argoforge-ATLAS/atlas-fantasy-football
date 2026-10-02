@@ -54,6 +54,16 @@ def get_trending_adds(lookback_hours: int = 24, limit: int = 50):
     return _get(f"/players/nfl/trending/add?lookback_hours={lookback_hours}&limit={limit}")
 
 
+def get_week_stats(season: str, week: int) -> dict:
+    """
+    Raw stat totals for every player for one completed week, e.g.
+    {"4046": {"pass_yd": 275, "pass_td": 2, ...}, ...}.
+    Used to compute real fantasy points under a league's own scoring
+    rules, rather than relying on generic rankings from elsewhere.
+    """
+    return _get(f"/stats/nfl/regular/{season}/{week}")
+
+
 def get_players_cached() -> dict:
     """
     The full NFL player dictionary is a multi-MB file that rarely

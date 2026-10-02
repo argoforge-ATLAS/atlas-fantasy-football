@@ -42,6 +42,7 @@ async function selectLeague(leagueId) {
 
 async function loadLeagueView(leagueId) {
   content.innerHTML = '<p class="loading">Loading...</p>';
+  loadRecommendations(leagueId);
   try {
     const [matchup, lineup] = await Promise.all([
       fetchJSON(`/api/leagues/${leagueId}/matchup`),
@@ -82,41 +83,34 @@ async function loadLeagueView(leagueId) {
 
 refreshBtn.onclick = () => activeLeagueId && loadLeagueView(activeLeagueId);
 
-const adviceBtn = document.getElementById("adviceBtn");
 const adviceOutput = document.getElementById("adviceOutput");
 
-adviceBtn.onclick = async () => {
-  if (!activeLeagueId) return;
-  adviceBtn.disabled = true;
-  adviceBtn.textContent = "Preparing...";
-  adviceOutput.innerHTML = "";
+async function loadRecommendations(leagueId) {
+  adviceOutput.innerHTML = '<p class="loading">Loading...</p>';
   try {
-    const res = await fetch(`/api/leagues/${activeLeagueId}/advice-prompt`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
+    const data = await fetchJSON(`/api/leagues/${leagueId}/recommendations`);
+    let html = "";
 
-    let copied = false;
-    try {
-      await navigator.clipboard.writeText(data.prompt);
-      copied = true;
-    } catch (clipErr) {
-      copied = false;
-    }
-
-    if (copied) {
-      adviceOutput.innerHTML = `<p class="advice-text">Copied! Paste it into a Claude chat to get your advice.</p>`;
+    if (data.swap_suggestions.length === 0) {
+      html += "<p>No swaps suggested right now - your lineup looks set.</p>";
     } else {
-      // Clipboard access can fail (e.g. no HTTPS) - fall back to a selectable textbox.
-      adviceOutput.innerHTML = `<p>Couldn't auto-copy - select all the text below and copy it manually:</p>
-        <textarea readonly rows="6" style="width:100%;">${data.prompt}</textarea>`;
+      html += data.swap_suggestions.map(s => `
+        <div class="player-row">
+          <span><strong>Start ${s.start}</strong> over ${s.sit} (${s.slot})<br><span class="hint">${s.reason}</span></span>
+        </div>`).join("");
     }
+
+    html += '<h3 style="margin-top:1.25rem;">Top waiver targets</h3>';
+    html += data.top_waivers.map(w => {
+      const pts = w.recent_avg_points !== null ? `${w.recent_avg_points} pts/gm (last 3 wks)` : `trending (${w.add_count_48h} adds/48h)`;
+      return `<div class="player-row"><span>${w.name} (${w.position || "?"})</span><span class="hint">${pts}</span></div>`;
+    }).join("");
+
+    adviceOutput.innerHTML = html;
   } catch (err) {
-    adviceOutput.innerHTML = `<p class="error">Couldn't prepare the data: ${err.message}</p>`;
-  } finally {
-    adviceBtn.disabled = false;
-    adviceBtn.textContent = "Copy data for Claude";
+    adviceOutput.innerHTML = `<p class="error">Couldn't load recommendations: ${err.message}</p>`;
   }
-};
+}
 
 loadLeagues().catch(err => {
   content.innerHTML = `<p class="error">Couldn't load leagues: ${err.message}</p>`;
