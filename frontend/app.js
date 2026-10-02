@@ -173,10 +173,17 @@ async function loadDropCandidates(leagueId) {
     html += data.candidates.map(c => {
       const prod = c.recent_avg_points !== null ? `${c.recent_avg_points} pts/gm` : "no recent production";
       const keeperBadge = c.keeper_eligible ? ' <span class="label-keeper">Keeper eligible</span>' : "";
+      const verdictClass = c.verdict === "Hold - role growing" ? "label-strength" : "label-weakness";
+      let opportunity = "";
+      if (c.opportunity_pct !== null && c.opportunity_pct !== undefined) {
+        const trendText = c.opportunity_trend ? ` (${c.opportunity_trend.toLowerCase()})` : "";
+        opportunity = ` · ${c.opportunity_pct}% share${trendText}`;
+      }
       return `
         <div class="player-row">
           <span><strong>${c.name}</strong>${keeperBadge}</span>
-          <span class="pos">${c.position || "?"} · ${prod}</span>
+          <span class="pos">${c.position || "?"} · ${prod}${opportunity}</span>
+          <span class="${verdictClass}">${c.verdict}</span>
         </div>`;
     }).join("");
     html += "</div>";

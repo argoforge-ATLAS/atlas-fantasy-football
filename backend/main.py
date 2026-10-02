@@ -26,6 +26,7 @@ import fantasycalc_client as fantasycalc
 import nfl_schedule
 import defense_rankings
 import keeper_eligibility
+import opportunity
 from config import LEAGUES, SLEEPER_USERNAME
 
 # DickMelt Fantasies has a house rule: a player keeps keeper
@@ -389,20 +390,33 @@ def get_weekly_matchups(league_id: str):
 
 DROP_CANDIDATE_MAX_PTS = 4.0  # below this recent avg, worth a second look
 
+# A low scorer whose share of their team's own targets/carries is at
+# or above this (or climbing) likely hasn't converted opportunity into
+# points yet, rather than having no real role - worth holding, not
+# cutting. A starting rule of thumb, not a tuned number.
+STASH_OPPORTUNITY_PCT = 18.0
+
 
 @app.get("/api/leagues/{league_id}/drop-candidates")
 def get_drop_candidates(league_id: str):
     """
-    Bench players producing little enough that they're worth
-    reconsidering for the waiver wire. In DickMelt Fantasies, players
-    who are still keeper-eligible (never touched waivers, however they
-    got onto your roster) are flagged rather than suggested outright -
-    dropping them costs that eligibility for good.
+    Bench players worth reconsidering for the waiver wire. Raw recent
+    points alone can't tell "role is gone" apart from "real role,
+    hasn't converted yet" - so RB/WR/TE are also checked against their
+    share of their own team's targets/carries (and whether that share
+    is rising or falling) before being called an actual drop candidate
+    vs. a stash. In DickMelt Fantasies, players who are still
+    keeper-eligible (never touched waivers, however they got onto your
+    roster) are flagged rather than suggested outright - dropping them
+    costs that eligibility for good.
     """
     if league_id not in _league_lookup:
         raise HTTPException(404, "Unknown league")
 
     league_info, starters, bench, waiver_candidates = _build_player_pool(league_id)
+    state = sleeper.get_nfl_state()
+    season, current_week = state["season"], state["week"]
+    lookback_weeks = scoring.get_recent_weeks(current_week)
 
     enforce_keeper_rule = league_info.get("name") in KEEPER_RULE_LEAGUE_NAMES
     keeper_eligible_ids = set()
@@ -420,14 +434,33 @@ def get_drop_candidates(league_id: str):
         pts = b.get("recent_avg_points")
         if pts is not None and pts >= DROP_CANDIDATE_MAX_PTS:
             continue
+
+        position = b.get("position")
+        opportunity_pct, opportunity_dir = (None, None)
+        if position in ("RB", "WR", "TE"):
+            opportunity_pct, opportunity_dir = opportunity.opportunity_trend(
+                b["id"], b.get("team"), position, season, lookback_weeks
+            )
+
+        is_stash = opportunity_dir == "Rising" or (
+            opportunity_pct is not None and opportunity_pct >= STASH_OPPORTUNITY_PCT
+        )
+        verdict = "Hold - role growing" if is_stash else "Drop candidate"
+
         candidates.append({
             "name": b["name"],
-            "position": b.get("position"),
+            "position": position,
             "recent_avg_points": pts,
+            "opportunity_pct": opportunity_pct,
+            "opportunity_trend": opportunity_dir,
+            "verdict": verdict,
             "keeper_eligible": enforce_keeper_rule and b["id"] in keeper_eligible_ids,
         })
 
-    candidates.sort(key=lambda c: c["recent_avg_points"] if c["recent_avg_points"] is not None else -1)
+    candidates.sort(key=lambda c: (
+        c["verdict"] != "Drop candidate",
+        c["recent_avg_points"] if c["recent_avg_points"] is not None else -1,
+    ))
 
     return {
         "league_id": league_id,
