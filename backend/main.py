@@ -168,9 +168,20 @@ def _build_player_pool(league_id: str):
     # This week's real NFL schedule, and how tough each defense has
     # been against each position recently (both independent of
     # Sleeper/FantasyCalc - computed from raw stats + ESPN's schedule).
-    this_week_schedule = nfl_schedule.get_week_schedule(season, current_week)
+    # Look at this week plus the next two - useful for "is this waiver
+    # pickup's schedule actually good, or just a one-week mirage?"
+    upcoming_weeks = [current_week, current_week + 1, current_week + 2]
+    upcoming_schedules = {w: nfl_schedule.get_week_schedule(season, w) for w in upcoming_weeks}
     lookback_weeks = scoring.get_recent_weeks(current_week)
     defense_ranks = defense_rankings.get_defense_rankings(season, lookback_weeks, scoring_settings)
+
+    def _matchup_for(team, position, opponent):
+        if not opponent or position not in defense_rankings.RELEVANT_POSITIONS:
+            return None
+        rank_info = defense_ranks.get(opponent, {}).get(position)
+        if not rank_info:
+            return None
+        return defense_rankings.matchup_label(rank_info["rank"], rank_info["out_of"])
 
     def enrich(pid):
         brief = _player_brief(players, pid)
@@ -181,14 +192,24 @@ def _build_player_pool(league_id: str):
 
         team = brief.get("team")
         position = brief.get("position")
-        opponent = this_week_schedule.get(team) if team else None
-        brief["opponent"] = opponent
-        brief["matchup_label"] = None
-        if opponent and position in defense_rankings.RELEVANT_POSITIONS:
-            rank_info = defense_ranks.get(opponent, {}).get(position)
-            if rank_info:
-                brief["matchup_label"] = defense_rankings.matchup_label(rank_info["rank"], rank_info["out_of"])
-                brief["matchup_detail"] = f"{opponent} allows the {_ordinal(rank_info['rank'])}-most {position} points in the league"
+
+        upcoming = []
+        for w in upcoming_weeks:
+            opponent = upcoming_schedules.get(w, {}).get(team) if team else None
+            upcoming.append({
+                "week": w,
+                "opponent": opponent,
+                "matchup_label": _matchup_for(team, position, opponent),
+            })
+        brief["upcoming_matchups"] = upcoming
+
+        # Keep these top-level for backwards compatibility / this week's view.
+        this_week = upcoming[0]
+        brief["opponent"] = this_week["opponent"]
+        brief["matchup_label"] = this_week["matchup_label"]
+        if this_week["opponent"] and brief["matchup_label"]:
+            rank_info = defense_ranks.get(this_week["opponent"], {}).get(position)
+            brief["matchup_detail"] = f"{this_week['opponent']} allows the {_ordinal(rank_info['rank'])}-most {position} points in the league"
         return brief
 
     starters = [enrich(pid) for pid in starter_ids]

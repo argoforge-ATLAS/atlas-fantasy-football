@@ -46,6 +46,24 @@ const MATCHUP_LABEL_CLASS = {
   "Good matchup": "label-strength",
 };
 
+const MATCHUP_CHIP_CLASS = {
+  "Tough matchup": "tough",
+  "Average matchup": "average",
+  "Good matchup": "good",
+};
+
+// Renders the next few weeks' opponents as small colored chips -
+// green = good matchup, red = tough, gray = average or unknown yet.
+function matchupChips(upcoming) {
+  if (!upcoming || !upcoming.length) return "";
+  const chips = upcoming.map(u => {
+    const cls = MATCHUP_CHIP_CLASS[u.matchup_label] || "unknown";
+    const text = u.opponent || "BYE";
+    return `<span class="matchup-chip ${cls}" title="Week ${u.week}${u.matchup_label ? ': ' + u.matchup_label : ''}">${text}</span>`;
+  }).join("");
+  return `<span class="matchup-chips">${chips}</span>`;
+}
+
 async function loadLeagueView(leagueId) {
   content.innerHTML = '<p class="loading">Loading...</p>';
   loadRecommendations(leagueId);
@@ -110,10 +128,8 @@ async function loadRecommendations(leagueId) {
     html += data.top_waivers.map(w => {
       const prod = w.recent_avg_points !== null ? `${w.recent_avg_points} pts/gm` : "no recent stats";
       const fc = w.fantasycalc_value !== null ? `FC value ${w.fantasycalc_value}` : "unranked";
-      const matchup = w.opponent
-        ? ` · vs ${w.opponent}${w.matchup_label ? " (" + w.matchup_label + ")" : ""}`
-        : "";
-      return `<div class="player-row"><span>${w.name}</span><span class="pos">${w.position || "?"} · ${prod} · ${fc}${matchup}</span></div>`;
+      const chips = matchupChips(w.upcoming_matchups);
+      return `<div class="player-row"><span>${w.name}</span><span class="pos">${w.position || "?"} · ${prod} · ${fc}</span>${chips}</div>`;
     }).join("");
     html += "</div>";
 
