@@ -76,8 +76,8 @@ function matchupChips(upcoming) {
 async function loadLeagueView(leagueId) {
   content.innerHTML = '<p class="loading">Loading...</p>';
   loadRecommendations(leagueId);
-  loadTeamNeeds(leagueId);
   loadDropCandidates(leagueId);
+  loadTeamNeeds(leagueId);
   try {
     const data = await fetchJSON(`/api/leagues/${leagueId}/matchups`);
 
