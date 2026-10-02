@@ -1,0 +1,12 @@
+services:
+  lineup-hq:
+    build: .
+    container_name: lineup-hq
+    restart: unless-stopped
+    ports:
+      - "8095:8000"
+    volumes:
+      - lineup-hq-data:/app/data
+
+volumes:
+  lineup-hq-data:
