@@ -48,6 +48,12 @@ def get_matchups(league_id: str, week: int):
     return _get(f"/league/{league_id}/matchups/{week}")
 
 
+def get_trending_adds(lookback_hours: int = 24, limit: int = 50):
+    """Players being added across all of Sleeper right now - a free,
+    real-time signal for 'who's hot on waivers'."""
+    return _get(f"/players/nfl/trending/add?lookback_hours={lookback_hours}&limit={limit}")
+
+
 def get_players_cached() -> dict:
     """
     The full NFL player dictionary is a multi-MB file that rarely

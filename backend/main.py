@@ -10,8 +10,10 @@ Serves:
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 import sleeper_client as sleeper
+import advisor
 from config import LEAGUES, SLEEPER_USERNAME
 
 app = FastAPI(title="Atlas Fantasy Football - Lineup HQ")
@@ -44,6 +46,16 @@ def _player_name(players: dict, player_id: str) -> str:
     if not p:
         return player_id
     return p.get("full_name") or f"{p.get('first_name', '')} {p.get('last_name', '')}".strip()
+
+
+def _player_brief(players: dict, player_id: str) -> dict:
+    p = players.get(player_id, {})
+    return {
+        "name": _player_name(players, player_id),
+        "position": p.get("position"),
+        "team": p.get("team"),
+        "injury_status": p.get("injury_status"),
+    }
 
 
 @app.get("/api/leagues")
@@ -118,6 +130,53 @@ def get_matchup(league_id: str):
             "points": opponent.get("points", 0) if opponent else 0,
         },
     }
+
+
+class AdviceRequest(BaseModel):
+    notes: str = ""
+
+
+@app.post("/api/leagues/{league_id}/advice")
+def get_advice(league_id: str, body: AdviceRequest):
+    if league_id not in _league_lookup:
+        raise HTTPException(404, "Unknown league")
+
+    league_info = sleeper.get_league(league_id)
+    my_roster, all_rosters, _ = _find_my_roster(league_id)
+    players = sleeper.get_players_cached()
+
+    starters = [_player_brief(players, pid) for pid in (my_roster.get("starters") or [])]
+    all_player_ids = my_roster.get("players") or []
+    bench = [_player_brief(players, pid) for pid in all_player_ids if pid not in (my_roster.get("starters") or [])]
+
+    # Waiver candidates: players trending up across Sleeper right now
+    # who are NOT already rostered by anyone in this league.
+    rostered_ids = set()
+    for r in all_rosters:
+        rostered_ids.update(r.get("players") or [])
+
+    trending = sleeper.get_trending_adds(lookback_hours=48, limit=75)
+    waiver_candidates = []
+    for t in trending:
+        pid = t["player_id"]
+        if pid not in rostered_ids:
+            brief = _player_brief(players, pid)
+            brief["add_count_48h"] = t.get("count")
+            waiver_candidates.append(brief)
+        if len(waiver_candidates) >= 15:
+            break
+
+    context = {
+        "league_name": league_info.get("name"),
+        "scoring_settings": league_info.get("scoring_settings"),
+        "roster_positions": league_info.get("roster_positions"),
+        "my_starters": starters,
+        "my_bench": bench,
+        "top_waiver_candidates": waiver_candidates,
+    }
+
+    advice_text = advisor.get_weekly_advice(context, human_notes=body.notes)
+    return {"league_id": league_id, "advice": advice_text}
 
 
 # Serve the frontend last, so /api/* routes above take priority.

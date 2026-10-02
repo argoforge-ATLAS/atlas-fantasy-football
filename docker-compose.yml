@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     ports:
       - "8095:8000"
+    env_file:
+      - .env
     volumes:
       - lineup-hq-data:/app/data
 

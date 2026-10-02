@@ -82,6 +82,32 @@ async function loadLeagueView(leagueId) {
 
 refreshBtn.onclick = () => activeLeagueId && loadLeagueView(activeLeagueId);
 
+const adviceBtn = document.getElementById("adviceBtn");
+const adviceOutput = document.getElementById("adviceOutput");
+const notesInput = document.getElementById("notesInput");
+
+adviceBtn.onclick = async () => {
+  if (!activeLeagueId) return;
+  adviceBtn.disabled = true;
+  adviceBtn.textContent = "Thinking...";
+  adviceOutput.innerHTML = "";
+  try {
+    const res = await fetch(`/api/leagues/${activeLeagueId}/advice`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notes: notesInput.value }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    adviceOutput.innerHTML = `<p class="advice-text">${data.advice.replace(/\n/g, "<br>")}</p>`;
+  } catch (err) {
+    adviceOutput.innerHTML = `<p class="error">Couldn't get advice: ${err.message}</p>`;
+  } finally {
+    adviceBtn.disabled = false;
+    adviceBtn.textContent = "Get start/sit & waiver advice";
+  }
+};
+
 loadLeagues().catch(err => {
   content.innerHTML = `<p class="error">Couldn't load leagues: ${err.message}</p>`;
 });
