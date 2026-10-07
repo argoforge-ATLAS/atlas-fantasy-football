@@ -84,21 +84,30 @@ async function loadLeagueView(leagueId) {
     let html = `<div class="card"><h2>Week ${data.week || ""} Matchups</h2>`;
     html += '<p class="hint">Your roster\'s real-life opponents this week, and how tough each defense has been against that position recently.</p>';
 
-    const withMatchup = data.players.filter(p => p.opponent);
-    if (!withMatchup.length) {
+    // Show a player either way - a bye-week guy still belongs here,
+    // just labeled, rather than silently vanishing from the list.
+    const relevant = data.players.filter(p => p.opponent || p.on_bye);
+    if (!relevant.length) {
       html += "<p>No matchup data yet - check back once the week's schedule is set.</p>";
     } else {
       html += '<div class="player-list">';
-      html += withMatchup.map(p => {
-        const labelClass = MATCHUP_LABEL_CLASS[p.matchup_label] || "label-average";
-        const label = p.matchup_label
-          ? `<span class="${labelClass}">${p.matchup_label}</span>`
-          : '<span class="hint">not enough data yet</span>';
-        const prod = p.recent_avg_points !== null ? `${p.recent_avg_points} pts/gm` : "no recent production";
+      html += relevant.map(p => {
+        let matchupCol, label;
+        if (p.on_bye) {
+          matchupCol = `${p.position} · BYE this week`;
+          label = '<span class="label-weakness">Bye week</span>';
+        } else {
+          const labelClass = MATCHUP_LABEL_CLASS[p.matchup_label] || "label-average";
+          label = p.matchup_label
+            ? `<span class="${labelClass}">${p.matchup_label}</span>`
+            : '<span class="hint">not enough data yet</span>';
+          const prod = p.recent_avg_points !== null ? `${p.recent_avg_points} pts/gm` : "no recent production";
+          matchupCol = `${p.position} vs ${p.opponent} · ${prod}`;
+        }
         return `
           <div class="player-row">
             <span><strong>${p.name}</strong>${injuryBadge(p)}</span>
-            <span class="pos">${p.position} vs ${p.opponent} · ${prod}</span>
+            <span class="pos">${matchupCol}</span>
             <span class="hint">${label}</span>
           </div>`;
       }).join("");

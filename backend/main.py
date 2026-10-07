@@ -219,10 +219,17 @@ def _build_player_pool(league_id: str):
 
         upcoming = []
         for w in upcoming_weeks:
-            opponent = upcoming_schedules.get(w, {}).get(team) if team else None
+            week_schedule = upcoming_schedules.get(w) or {}
+            opponent = week_schedule.get(team) if team else None
+            # A team genuinely has no game that week (bye) only if we
+            # have a real schedule for that week and the team's just
+            # missing from it - not if the schedule fetch itself came
+            # back empty (ESPN unreachable, week not published yet).
+            on_bye = bool(team) and bool(week_schedule) and team not in week_schedule
             upcoming.append({
                 "week": w,
                 "opponent": opponent,
+                "on_bye": on_bye,
                 "matchup_label": _matchup_for(team, position, opponent),
             })
         brief["upcoming_matchups"] = upcoming
@@ -230,6 +237,7 @@ def _build_player_pool(league_id: str):
         # Keep these top-level for backwards compatibility / this week's view.
         this_week = upcoming[0]
         brief["opponent"] = this_week["opponent"]
+        brief["on_bye"] = this_week["on_bye"]
         brief["matchup_label"] = this_week["matchup_label"]
         if this_week["opponent"] and brief["matchup_label"]:
             rank_info = defense_ranks.get(this_week["opponent"], {}).get(position)
@@ -279,8 +287,10 @@ def _build_player_pool(league_id: str):
 def get_recommendations(league_id: str):
     """
     Start/sit and waiver suggestions, computed entirely in Python:
-      - A starter with an Out/Doubtful/IR/etc. status is always
-        flagged, regardless of points.
+      - A starter with an Out/Doubtful/IR/etc. status, OR whose real
+        NFL team is on a bye this week, is always flagged, regardless
+        of points. A bye-week player is likewise never recommended as
+        the replacement.
       - Otherwise, a bench player is suggested over a starter only if
         they're eligible for that roster slot AND their recent average
         (last 3 completed weeks, scored under this league's real
@@ -297,9 +307,10 @@ def get_recommendations(league_id: str):
     swap_suggestions = []
     used_bench_ids = set()
 
-    # Handle must-sit (injured/etc.) starters first, then point-based upgrades.
+    # Handle must-sit (injured, OR on a bye this week) starters first,
+    # then point-based upgrades.
     def is_bad(p):
-        return p.get("bad_injury", False)
+        return p.get("bad_injury", False) or p.get("on_bye", False)
 
     ordered_starters = sorted(starters, key=lambda s: (not is_bad(s),))
 
@@ -309,7 +320,7 @@ def get_recommendations(league_id: str):
             b for b in bench
             if b["id"] not in used_bench_ids
             and b.get("position") in eligible_positions
-            and not is_bad(b)  # never recommend starting an injured/Out player
+            and not is_bad(b)  # never recommend starting an injured/Out/bye-week player
         ]
         if not candidates:
             continue
@@ -323,7 +334,9 @@ def get_recommendations(league_id: str):
         bench_pts = best_bench.get("recent_avg_points")
 
         reason = None
-        if is_bad(starter):
+        if starter.get("on_bye"):
+            reason = f"{starter['name']} is on a bye this week"
+        elif is_bad(starter):
             reason = f"{starter['name']} is {starter['injury_status']}"
         elif starter_pts is not None and bench_pts is not None and bench_pts - starter_pts > 1.5:
             reason = f"{best_bench['name']} has outscored {starter['name']} recently ({bench_pts} vs {starter_pts} pts/gm)"
@@ -381,6 +394,7 @@ def get_weekly_matchups(league_id: str):
             "position": p.get("position"),
             "team": p.get("team"),
             "opponent": p.get("opponent"),
+            "on_bye": p.get("on_bye"),
             "matchup_label": p.get("matchup_label"),
             "matchup_detail": p.get("matchup_detail"),
             "recent_avg_points": p.get("recent_avg_points"),
