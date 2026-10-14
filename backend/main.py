@@ -323,6 +323,17 @@ def get_recommendations(league_id: str):
             and not is_bad(b)  # never recommend starting an injured/Out/bye-week player
         ]
         if not candidates:
+            # A must-sit starter still needs flagging even when nobody
+            # on the bench can fill the slot (e.g. a TE on bye with no
+            # backup TE) - otherwise the problem is silently hidden.
+            if is_bad(starter):
+                problem = "on a bye this week" if starter.get("on_bye") else starter["injury_status"]
+                swap_suggestions.append({
+                    "slot": starter["slot"],
+                    "sit": starter["name"],
+                    "start": None,
+                    "reason": f"{starter['name']} is {problem}, and no one on your bench can fill the {starter['slot']} slot - check waivers",
+                })
             continue
 
         def sort_key(b):

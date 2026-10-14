@@ -137,8 +137,8 @@ async function loadRecommendations(leagueId) {
       html += '<div class="player-list">';
       html += data.swap_suggestions.map(s => `
         <div class="player-row">
-          <span><strong>Start ${s.start}</strong></span>
-          <span class="pos">over ${s.sit} (${s.slot})</span>
+          <span><strong>${s.start ? `Start ${s.start}` : `Bench ${s.sit}`}</strong></span>
+          <span class="pos">${s.start ? `over ${s.sit} (${s.slot})` : `no bench replacement (${s.slot})`}</span>
           <span class="hint">${s.reason}</span>
         </div>`).join("");
       html += "</div>";
