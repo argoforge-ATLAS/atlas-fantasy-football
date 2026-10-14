@@ -30,8 +30,10 @@ LEAGUES = {
     "1388712035025424384": {"name": "Chiefs By 90", "stat": "pts_ppr"},
 }
 LINEUP_HQ = os.environ.get("LINEUP_HQ_URL", "http://localhost:8095")
-OUT_DIR = Path(os.environ.get("SNAPSHOT_DIR", Path(__file__).parent / "snapshots"))
-PLAYERS_CACHE = Path(os.environ.get("PLAYERS_CACHE", Path(__file__).parent / "players_cache.json"))
+# Work files live outside the Lineup HQ repo so git status there stays clean.
+CACHE_DIR = Path(os.environ.get("SNAPSHOT_CACHE_DIR", Path.home() / ".cache" / "fantasy-snapshot"))
+OUT_DIR = Path(os.environ.get("SNAPSHOT_DIR", CACHE_DIR / "snapshots"))
+PLAYERS_CACHE = Path(os.environ.get("PLAYERS_CACHE", CACHE_DIR / "players_cache.json"))
 POSITIONS = ["QB", "RB", "WR", "TE", "DEF"]
 
 s = requests.Session()
@@ -48,6 +50,7 @@ def players_dict():
     if PLAYERS_CACHE.exists() and time.time() - PLAYERS_CACHE.stat().st_mtime < 20 * 3600:
         return json.loads(PLAYERS_CACHE.read_text())
     data = get("/players/nfl", timeout=120)
+    PLAYERS_CACHE.parent.mkdir(parents=True, exist_ok=True)
     PLAYERS_CACHE.write_text(json.dumps(data))
     return data
 
@@ -96,7 +99,8 @@ def build_league(lid, cfg, P, season, week, uid, season_stats, trending):
                 "team": team_of[r["roster_id"]],
                 "wins": r["settings"]["wins"],
                 "losses": r["settings"]["losses"],
-                "pf": r["settings"].get("fpts"),
+                # Sleeper keeps the decimal part in a separate field
+                "pf": round((r["settings"].get("fpts") or 0) + (r["settings"].get("fpts_decimal") or 0) / 100, 2),
                 "waiver_position": r["settings"].get("waiver_position"),
             }
             for r in rosters
@@ -182,7 +186,12 @@ def build_league(lid, cfg, P, season, week, uid, season_stats, trending):
     }
 
 
+def stamp(msg):
+    print(f"[{datetime.datetime.now().astimezone().isoformat(timespec='seconds')}] {msg}", flush=True)
+
+
 def main():
+    stamp("snapshot starting")
     state = get("/state/nfl")
     season, week = state["season"], state["week"]
     uid = get(f"/user/{USERNAME}")["user_id"]
@@ -203,7 +212,7 @@ def main():
     text = json.dumps(snap, indent=1)
     (OUT_DIR / "latest.json").write_text(text)
     (OUT_DIR / f"{season}-week{week:02d}.json").write_text(text)
-    print(f"wrote {OUT_DIR / 'latest.json'} ({len(text) // 1024} KB), week {week}")
+    stamp(f"wrote {OUT_DIR / 'latest.json'} ({len(text) // 1024} KB), sleeper week {week}")
 
     repo = os.environ.get("DATA_REPO_DIR")
     if repo:
@@ -217,7 +226,9 @@ def main():
         if diff.returncode != 0:
             run("git", "commit", "-m", f"snapshot week {week}")
             run("git", "push")
-            print("pushed to data repo")
+            stamp("pushed to data repo")
+        else:
+            stamp("no changes to push")
 
 
 if __name__ == "__main__":
