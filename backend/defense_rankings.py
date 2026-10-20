@@ -7,9 +7,10 @@ pulled from some other website.
 Method: for each of the last few completed weeks, look at every
 player's actual stat line, figure out who their opponent was (via
 nfl_schedule), score it with this league's own scoring rules, and
-add it to a running total of "points allowed" for that opponent at
-that position. Teams are then ranked 1 (fewest points allowed -
-toughest matchup) to 32 (most allowed - easiest matchup).
+add it to that opponent's total "points allowed" at that position
+for that week. A defense's rating is its average weekly total over
+the games it actually played. Teams are ranked 1 (fewest points
+allowed - toughest matchup) to 32 (most allowed - easiest matchup).
 """
 import time
 
@@ -39,8 +40,13 @@ def get_defense_rankings(season: str, weeks: list[int], scoring_settings: dict) 
         return _cache[key][1]
 
     players = sleeper.get_players_cached()
-    totals = {}  # (opponent_team, position) -> total points allowed
-    games = {}   # (opponent_team, position) -> games counted
+    # (opponent, position, week) -> total points that defense allowed
+    # to ALL players at that position that week. A defense's real
+    # "points allowed per game" is that weekly total averaged over the
+    # weeks it actually played - NOT averaged over individual player
+    # stat lines (which rewards defenses that happen to face lots of
+    # garbage-time backups and makes them look tougher than they are).
+    weekly_totals = {}
 
     for week in weeks:
         week_stats = sleeper.get_week_stats(season, week)
@@ -59,9 +65,15 @@ def get_defense_rankings(season: str, weeks: list[int], scoring_settings: dict) 
             if not opponent:
                 continue
             pts = scoring.score_stat_line(stat_line, scoring_settings)
-            tkey = (opponent, position)
-            totals[tkey] = totals.get(tkey, 0) + pts
-            games[tkey] = games.get(tkey, 0) + 1
+            wkey = (opponent, position, week)
+            weekly_totals[wkey] = weekly_totals.get(wkey, 0) + pts
+
+    totals = {}  # (opponent, position) -> sum of weekly totals
+    games = {}   # (opponent, position) -> number of games (weeks) counted
+    for (opponent, position, _week), pts in weekly_totals.items():
+        tkey = (opponent, position)
+        totals[tkey] = totals.get(tkey, 0) + pts
+        games[tkey] = games.get(tkey, 0) + 1
 
     averages = {}
     for tkey, total in totals.items():

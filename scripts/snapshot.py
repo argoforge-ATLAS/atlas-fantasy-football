@@ -182,6 +182,10 @@ def build_league(lid, cfg, P, season, week, uid, season_stats, trending):
             "matchups": app_json(f"/api/leagues/{lid}/matchups"),
             "drop_candidates": app_json(f"/api/leagues/{lid}/drop-candidates"),
             "team_needs": app_json(f"/api/leagues/{lid}/team-needs"),
+            # New in v2: the real head-to-head, and priced trade targets.
+            # (The waiver plan - ordered add/drop pairs - rides inside "recommendations".)
+            "live_matchup": app_json(f"/api/leagues/{lid}/live-matchup"),
+            "trade_targets": app_json(f"/api/leagues/{lid}/trade-targets"),
         },
     }
 

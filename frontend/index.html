@@ -9,29 +9,54 @@
 <body>
   <header>
     <h1>Lineup HQ</h1>
-    <button id="refreshBtn" aria-label="Refresh">&#x21bb;</button>
+    <div class="header-actions">
+      <a id="overlayLink" class="overlay-link" href="overlay.html" target="_blank" rel="noopener">TV overlay</a>
+      <button id="refreshBtn" aria-label="Refresh">&#x21bb;</button>
+    </div>
   </header>
 
   <nav id="leagueTabs" class="tabs"></nav>
 
-  <section id="adviceSection" class="card" style="margin: 1rem 1.25rem;">
+  <section id="scoreboardSection" class="card section">
+    <h2>This week's matchup</h2>
+    <div id="scoreboardOutput"><p class="loading">Loading...</p></div>
+  </section>
+
+  <section id="adviceSection" class="card section">
     <h2>Recommendations</h2>
     <div id="adviceOutput"><p class="loading">Loading...</p></div>
   </section>
 
+  <section id="waiverSection" class="card section">
+    <h2>Waiver plan <span class="hint">in claim order</span></h2>
+    <div id="waiverOutput"><p class="loading">Loading...</p></div>
+  </section>
+
   <!-- Drop Candidates + Team Needs are grouped: who to cut, then what
-       that leaves you needing. Trade Targets will join this group
-       once it's built. -->
-  <section id="dropCandidatesSection" class="card" style="margin: 0 1.25rem 0.5rem;">
-    <h2>Drop Candidates</h2>
-    <p class="hint">Bench players producing little enough to be worth reconsidering.</p>
+       that leaves you needing. -->
+  <section id="dropCandidatesSection" class="card section">
+    <h2>Drop candidates</h2>
+    <p class="hint">Long-term value wins over a quiet week: young injured players and real dynasty assets are held.</p>
     <div id="dropCandidatesOutput"><p class="loading">Loading...</p></div>
   </section>
 
-  <section id="teamNeedsSection" class="card" style="margin: 0 1.25rem 1rem;">
-    <h2>Team Needs</h2>
-    <p class="hint">Your recent production at each position vs. the rest of your league.</p>
+  <section id="teamNeedsSection" class="card section">
+    <h2>Team needs</h2>
+    <p class="hint">Your starters at each position vs. every other roster's starters.</p>
     <div id="teamNeedsOutput"><p class="loading">Loading...</p></div>
+  </section>
+
+  <section id="tradeSection" class="card section">
+    <h2>Trades</h2>
+    <h3>Check a trade</h3>
+    <form id="tradeForm" class="trade-form" autocomplete="off">
+      <label>You give <input id="tradeGive" type="text" placeholder="Player Name, 2027 R2"></label>
+      <label>You get <input id="tradeGet" type="text" placeholder="Player Name"></label>
+      <button type="submit" class="btn">Evaluate</button>
+    </form>
+    <div id="tradeEvalOutput"></div>
+    <h3>Targets at your weak spots</h3>
+    <div id="tradeTargetsOutput"><p class="loading">Loading...</p></div>
   </section>
 
   <main id="content">
