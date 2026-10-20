@@ -215,6 +215,53 @@ class WaiverPlan(unittest.TestCase):
         self.assertTrue(rows[0]["long_term"])
 
 
+class FallbackPlan(unittest.TestCase):
+    def held(self):
+        return [
+            P("OldVet", "TE", 4.0, id="h1", verdict="Dynasty value - hold", age=37, keep_score=3.0, fantasycalc_value=1600),
+            P("OlderQB", "QB", 0.0, id="h2", verdict="Dynasty value - hold", age=31, keep_score=5.0, fantasycalc_value=2500),
+            P("YoungHurt", "WR", 0.0, id="h3", verdict="Young (22) & Questionable - hold", age=22, keep_score=0.1),
+            P("YoungValue", "RB", 5.0, id="h4", verdict="Dynasty value - hold", age=24, keep_score=0.2),
+            P("Rising", "WR", 3.0, id="h5", verdict="Hold - role growing", age=27, keep_score=0.3),
+            P("NoAge", "WR", 3.0, id="h6", verdict="Dynasty value - hold", age=None, keep_score=0.4),
+            P("Cut", "WR", 1.0, id="h7", verdict="Drop candidate", age=28, keep_score=0.1),
+        ]
+
+    def test_pool_only_offers_old_market_value_holds_least_valuable_first(self):
+        pool = lineup.fallback_drop_pool(self.held())
+        # young+injured, young value, role-growing, unknown age and real drop candidates are excluded
+        self.assertEqual([d["id"] for d in pool], ["h1", "h2"])
+
+    def test_fallback_rows_are_flagged_and_use_only_the_pool(self):
+        adds = [P("AddTE", "TE", 11.0, id="a1")]
+        rows = lineup.build_fallback_plan(adds, self.held(), {}, {}, dynasty=True)
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0]["fallback"])
+        self.assertEqual(rows[0]["drop"]["id"], "h1")  # same position, never the young hurt WR
+        self.assertIn("held for market value", rows[0]["warning"])
+        self.assertIn("trading", rows[0]["warning"])
+
+    def test_fallback_never_reuses_safe_plan_picks(self):
+        adds = [P("AddTE", "TE", 11.0, id="a1"), P("AddWR", "WR", 11.0, id="a2")]
+        rows = lineup.build_fallback_plan(
+            adds, self.held(), {}, {}, dynasty=True,
+            exclude_add_ids={"a1"}, exclude_drop_ids={"h2"},
+        )
+        self.assertTrue(all(r["add"]["id"] != "a1" for r in rows))
+        self.assertTrue(all(r["drop"]["id"] != "h2" for r in rows))
+
+    def test_open_slot_add_jumps_the_queue_and_skips_the_gain_bar(self):
+        swaps = [{"slot": "DEF", "sit": "BYE DEF", "start": None, "gain": None, "reason": "bye"},
+                 {"slot": "FLEX", "sit": "X", "start": None, "gain": None, "reason": "x"}]
+        self.assertEqual(lineup.open_slot_positions(swaps), {"DEF"})  # FLEX is not a position
+        adds = [P("BigWR", "WR", 14.0, id="a1"), P("StreamDEF", "DEF", 5.0, id="a2")]
+        drops = [P("Scrub", "WR", 4.5, id="d1", keep_score=0.1)]  # DEF add is only +0.5
+        rows = lineup.build_waiver_plan(adds, drops, {}, {}, dynasty=False, needed_positions={"DEF"})
+        self.assertEqual(rows[0]["add"]["name"], "StreamDEF")
+        self.assertTrue(rows[0]["fills_slot"])
+        self.assertIn("empty DEF slot", rows[0]["warning"])
+
+
 class Trades(unittest.TestCase):
     BOARD = {str(i): {"value": 10000 - i * 50, "overall_rank": i + 1} for i in range(300)}
 

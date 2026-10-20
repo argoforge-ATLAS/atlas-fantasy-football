@@ -237,6 +237,16 @@ class EndpointSmoke(unittest.TestCase):
         self.assertTrue(m["players"])
         self.assertTrue(main.get_lineup(LEAGUE_ID)["starters"])
 
+    def test_recommendations_include_fallback_fields(self):
+        rec = main.get_recommendations(LEAGUE_ID)
+        self.assertIn("fallback_plan", rec)
+        self.assertIn("open_slots", rec)
+        safe_drops = {r["drop"]["id"] for r in rec["waiver_plan"]}
+        for row in rec["fallback_plan"]:
+            self.assertTrue(row["fallback"])
+            self.assertNotIn(row["drop"]["id"], safe_drops)
+            self.assertNotEqual(row["drop"]["id"], self.young_hurt)  # young injured is never offered
+
     def test_frontend_dir_is_never_the_working_directory(self):
         # Regression: Path("") is ".", so an unset FRONTEND_DIR once made the
         # app serve its own source folder (no home page, and /main.py exposed).

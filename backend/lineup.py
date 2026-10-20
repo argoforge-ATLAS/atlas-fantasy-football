@@ -7,6 +7,7 @@ name, id, position, slot (starters only), expected_points,
 bad_injury, on_bye, injury_status, fantasycalc_value, age, ...
 """
 from projections import effective_points
+from valuation import YOUNG_AGE
 
 # A bench player must beat the starter by at least this many expected
 # points to be worth a swap (below that it's noise).
@@ -129,7 +130,16 @@ def add_score(p: dict, dynasty: bool) -> float:
     return expected + bump + min(p.get("add_count_48h", 0), 5000) / 5000.0
 
 
-def build_waiver_plan(adds: list, drops: list, position_counts: dict, caps: dict, dynasty: bool):
+def open_slot_positions(swap_suggestions: list) -> set:
+    """Positions with a starter slot nobody on the bench can fill (a
+    must-sit starter with no healthy replacement). An add at one of these
+    positions fixes a hole in this week's lineup, so it jumps the queue."""
+    plain = {"QB", "RB", "WR", "TE", "K", "DEF"}
+    return {s["slot"] for s in swap_suggestions if s.get("start") is None and s.get("slot") in plain}
+
+
+def build_waiver_plan(adds: list, drops: list, position_counts: dict, caps: dict, dynasty: bool,
+                      needed_positions=frozenset(), exclude_add_ids=frozenset()):
     """
     Claim-ordered list of (add, drop) pairs. Each add is paired with
     the best player to cut for it:
@@ -148,8 +158,13 @@ def build_waiver_plan(adds: list, drops: list, position_counts: dict, caps: dict
     counts = dict(position_counts)
 
     ranked_adds = sorted(
-        (a for a in adds if a.get("injury_status") not in UNADDABLE_STATUSES and not a.get("on_bye")),
-        key=lambda a: add_score(a, dynasty),
+        (a for a in adds
+         if a.get("injury_status") not in UNADDABLE_STATUSES
+         and not a.get("on_bye")
+         and a.get("id") not in exclude_add_ids),
+        # Adds that fill an empty lineup slot choose their drop first, so a
+        # bigger add elsewhere can't use up the only droppable player.
+        key=lambda a: (a.get("position") in needed_positions, add_score(a, dynasty)),
         reverse=True,
     )
 
@@ -183,12 +198,15 @@ def build_waiver_plan(adds: list, drops: list, position_counts: dict, caps: dict
         drop_fc = drop.get("fantasycalc_value") or 0.0
         long_term_win = dynasty and add_fc > 0 and add_fc >= max(drop_fc, 1.0) * ADD_MIN_VALUE_RATIO
 
-        if gain < ADD_MIN_GAIN and not long_term_win:
+        fills_slot = pos in needed_positions
+        if gain < ADD_MIN_GAIN and not long_term_win and not fills_slot:
             continue
-        if drop.get("keeper_eligible") and gain < KEEPER_BURN_MIN_GAIN:
+        if drop.get("keeper_eligible") and gain < KEEPER_BURN_MIN_GAIN and not fills_slot:
             continue  # not worth forfeiting keeper eligibility
 
         warnings = []
+        if fills_slot:
+            warnings.append(f"Fills your empty {pos} slot this week")
         if drop.get("keeper_eligible"):
             warnings.append("Dropping costs keeper eligibility for good")
         if at_cap:
@@ -203,8 +221,9 @@ def build_waiver_plan(adds: list, drops: list, position_counts: dict, caps: dict
             "drop": {k: drop.get(k) for k in ("id", "name", "position", "team", "expected_points", "fantasycalc_value", "age", "keeper_eligible")},
             "gain": gain,
             "long_term": bool(long_term_win and gain < ADD_MIN_GAIN),
+            "fills_slot": bool(fills_slot),
             "warning": "; ".join(warnings) or None,
-            "_rank": gain + (0.5 if long_term_win else 0.0),
+            "_rank": gain + (0.5 if long_term_win else 0.0) + (100.0 if fills_slot else 0.0),
         })
 
     rows.sort(key=lambda r: r["_rank"], reverse=True)
@@ -212,4 +231,51 @@ def build_waiver_plan(adds: list, drops: list, position_counts: dict, caps: dict
     for i, r in enumerate(rows, start=1):
         r["claim_order"] = i
         r.pop("_rank", None)
+    return rows
+
+
+# ------------------------------------------------------------ fallback drops
+
+# Hold verdicts that are about MARKET value only. These players can be
+# offered as a last resort (always flagged, never silently). Every other
+# hold - young + injured, young upside, role growing - is never offered,
+# because those are exactly the long-term bets the hold rules protect.
+FALLBACK_HOLD_VERDICT = "Dynasty value - hold"
+
+
+def fallback_drop_pool(drops: list) -> list:
+    """Held players that could be cut if the owner insists: held only for
+    market value, and past the 'young asset' age. Least valuable first."""
+    pool = [
+        d for d in drops
+        if d.get("verdict") == FALLBACK_HOLD_VERDICT
+        and d.get("age") is not None
+        and d["age"] > YOUNG_AGE
+    ]
+    pool.sort(key=lambda d: d.get("keep_score", 0.0))
+    return pool
+
+
+def build_fallback_plan(adds: list, drops: list, position_counts: dict, caps: dict, dynasty: bool,
+                        needed_positions=frozenset(), exclude_add_ids=frozenset(), exclude_drop_ids=frozenset()):
+    """
+    'If you must drop' list for when the safe plan has nothing (or not
+    enough): pairs adds with the least valuable HELD players. Every row
+    is flagged as cutting an asset, with its market value and a nudge to
+    trade instead, so the owner makes the call knowingly.
+    """
+    pool = [d for d in fallback_drop_pool(drops) if d["id"] not in exclude_drop_ids]
+    rows = build_waiver_plan(
+        adds, pool, position_counts, caps, dynasty,
+        needed_positions=needed_positions, exclude_add_ids=exclude_add_ids,
+    )
+    for r in rows:
+        r["fallback"] = True
+        value = r["drop"].get("fantasycalc_value")
+        note = (
+            f"{r['drop']['name']} is held for market value"
+            + (f" (FantasyCalc {round(value)})" if value else "")
+            + " - cutting him gives that away; trading him first is better if anyone will take him"
+        )
+        r["warning"] = note if not r.get("warning") else f"{r['warning']}; {note}"
     return rows

@@ -231,20 +231,36 @@ function renderAdvice(data) {
   return html;
 }
 
-function renderWaiverPlan(data) {
-  const plan = data.waiver_plan || [];
-  if (!plan.length) return "<p>No add/drop moves clear the bar this week. Your bench is holding its value.</p>";
-  const rows = plan.map(r => `
+function planRows(plan) {
+  return plan.map(r => `
     <tr>
       <td class="num"><strong>${esc(r.claim_order)}</strong></td>
       <td><span class="label-strength">ADD</span> <strong>${esc(r.add.name)}</strong>
         <div class="hint">${esc(r.add.position)} · proj ${fmt(r.add.expected_points)}${r.add.injury_status ? " · " + esc(r.add.injury_status) : ""}</div></td>
       <td><span class="label-weakness">DROP</span> <strong>${esc(r.drop.name)}</strong>
         <div class="hint">${esc(r.drop.position)} · proj ${fmt(r.drop.expected_points)}</div></td>
-      <td class="num">${r.long_term ? "long-term" : "+" + fmt(r.gain)}</td>
+      <td class="num">${r.fills_slot ? "fills slot" : (r.long_term ? "long-term" : "+" + fmt(r.gain))}</td>
     </tr>
     ${r.warning ? `<tr class="warn-row"><td></td><td colspan="3" class="hint">⚠ ${esc(r.warning)}</td></tr>` : ""}`);
-  return table(["#", "Add", "Drop", "Gain"], rows, "plan");
+}
+
+function renderWaiverPlan(data) {
+  const plan = data.waiver_plan || [];
+  const fallback = data.fallback_plan || [];
+  const open = (data.open_slots || []).length
+    ? `<p class="hint">Empty lineup slot this week: <strong>${esc(data.open_slots.join(", "))}</strong>.</p>` : "";
+  let html = open;
+  if (plan.length) {
+    html += table(["#", "Add", "Drop", "Gain"], planRows(plan), "plan");
+  } else {
+    html += "<p>No safe add/drop moves this week - everyone you could cut is held for long-term value.</p>";
+  }
+  if (fallback.length) {
+    html += "<h3>If you must drop</h3>"
+      + "<p class=\"hint\">Last resort. These players are held for market value, so cutting one gives that value away. Young and injured players are never listed here.</p>"
+      + table(["#", "Add", "Drop", "Gain"], planRows(fallback), "plan");
+  }
+  return html;
 }
 
 function loadAdvice(token, leagueId) {

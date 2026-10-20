@@ -437,12 +437,28 @@ def get_recommendations(league_id: str):
     for pid in pool["my_roster"].get("players") or []:
         pos = (pool["players"].get(pid) or {}).get("position")
         counts[pos] = counts.get(pos, 0) + 1
+    caps = POSITION_CAPS.get(league_name, {})
+    needed = lineup_logic.open_slot_positions(swap_suggestions)
     waiver_plan = lineup_logic.build_waiver_plan(
         adds=pool["waiver_candidates"],
         drops=[d for d in drops if d["verdict"] == "Drop candidate"],
         position_counts=counts,
-        caps=POSITION_CAPS.get(league_name, {}),
+        caps=caps,
         dynasty=dynasty,
+        needed_positions=needed,
+    )
+    # Last-resort list: the safe plan never cuts held players, which can
+    # leave it empty. Offer the least valuable market-value holds, clearly
+    # flagged, for adds the safe plan didn't already use.
+    fallback_plan = lineup_logic.build_fallback_plan(
+        adds=pool["waiver_candidates"],
+        drops=drops,
+        position_counts=counts,
+        caps=caps,
+        dynasty=dynasty,
+        needed_positions=needed,
+        exclude_add_ids={r["add"]["id"] for r in waiver_plan},
+        exclude_drop_ids={r["drop"]["id"] for r in waiver_plan},
     )
 
     return {
@@ -452,6 +468,8 @@ def get_recommendations(league_id: str):
         "swap_suggestions": swap_suggestions,
         "top_waivers": ranked_waivers,
         "waiver_plan": waiver_plan,
+        "fallback_plan": fallback_plan,
+        "open_slots": sorted(needed),
     }
 
 
