@@ -2,7 +2,7 @@
 
 A season-long fantasy football assistant for two Sleeper leagues, built in phases:
 
-1. **Lineup HQ** - week-to-week: your real head-to-head, start/sit, waiver plan, drops, team needs and trades.
+1. **Lineup HQ** - week-to-week: start/sit (Thursday and Sunday), the waiver plan and drops (Tuesday), team needs and trades.
 2. **Keepers** (later) - dynasty keeper valuation, carried forward from the old `atlas-fantasy` project.
 3. **Draft** (later) - live draft board, carried forward from the old `atlas-draft-board` project.
 
@@ -10,7 +10,6 @@ A season-long fantasy football assistant for two Sleeper leagues, built in phase
 
 | Panel / endpoint | What it answers |
 |---|---|
-| `GET /api/leagues/{id}/live-matchup` | Who am I actually playing? Both rosters with live points, done / playing / yet-to-play, projected finals, win probability and its history |
 | `GET /api/leagues/{id}/recommendations` | Start/sit on **expected points** (Sleeper projection blended with recent production, matchup-adjusted), best free agents, and the **waiver plan** |
 | waiver plan (inside `recommendations`) | Add/drop pairs in claim order, from real free agents; respects position caps and keeper eligibility |
 | `GET /api/leagues/{id}/drop-candidates` | Who is worth cutting - with long-term HOLD rules (young + injured, dynasty value) |
@@ -18,7 +17,6 @@ A season-long fantasy football assistant for two Sleeper leagues, built in phase
 | `GET /api/leagues/{id}/trade-eval?give=A,2027 R2&get=B` | Trade balance on live market value, with pick values, consolidation weighting and team tax |
 | `GET /api/leagues/{id}/trade-targets` | Who to target at your weak spots, priced, with a package from your own bench |
 | `GET /api/leagues/{id}/matchups` | Each rostered player's real NFL opponent and defense-vs-position difficulty |
-| `/overlay.html` | TV overlay (see below) |
 
 ### How the decisions are made
 
@@ -28,15 +26,6 @@ A season-long fantasy football assistant for two Sleeper leagues, built in phase
 * **Trades** price picks off the live board (a 1st is about the 18th-best player, a 2nd the 45th, ...), discount depth (best asset counts fully, then 75%, 55%, ...), and treat team tax as a price: you must clear the taxed price of what you receive for them to likely accept. Sending a protected pick or an untouchable player throws a warning.
 * **FantasyCalc** values are dynasty values in keeper/dynasty leagues (inferred from Sleeper's league type, override in `config.DYNASTY_OVERRIDES`) and redraft values otherwise.
 * **Defense rankings** are points allowed per *game* (weekly totals averaged over games played), not per player stat line.
-* **Win probability**: each side's final ~ Normal(points now + remaining projections, summed per-player variance); remaining output shrinks as ESPN's game clock advances.
-
-## TV overlay
-
-Open `http://<atlas-ip>:8095/overlay.html` on the TV (or the "TV overlay" link in the app header).
-
-* Quiet by default: a small corner chip with score and win %. The full panel pops open for about 12 seconds whenever a score changes, with a green or red flash.
-* Press **OK / Enter** on the remote (or tap) to open or close it.
-* Query options: `?league=<sleeper league id>` (default: first league), `?interval=20` (poll seconds), `?show=12` (seconds open after a change), `?mode=always` (keep the panel up).
 
 ## House rules and tuning
 
@@ -60,7 +49,7 @@ python -m unittest discover -s tests -v
 
 ## Data sources
 
-* [Sleeper API](https://docs.sleeper.com/) - rosters, live matchups, stats, trending adds. No key. API calls are cached for a few seconds to an hour depending on how fast the data moves; the full player list is cached for up to 20 hours.
+* [Sleeper API](https://docs.sleeper.com/) - rosters, stats, trending adds. No key. API calls are cached for a few seconds to an hour depending on how fast the data moves; the full player list is cached for up to 20 hours.
 * Sleeper weekly projections (`api.sleeper.com`, undocumented). If the endpoint is unavailable or changes shape, start/sit falls back to recent production with a matchup adjustment.
-* ESPN public scoreboard - schedule and live game clock.
+* ESPN public scoreboard - the weekly NFL schedule (opponents and byes).
 * FantasyCalc public API - market values for players and (via the board) picks.

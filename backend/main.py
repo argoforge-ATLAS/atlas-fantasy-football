@@ -14,8 +14,6 @@ Serves:
         by position vs. the rest of your league (starter-level, ranked)
   - GET /api/leagues/{league_id}/drop-candidates -> bench players worth a
         second look, with long-term HOLD rules (young + injured, dynasty value)
-  - GET /api/leagues/{league_id}/live-matchup -> your real head-to-head this
-        week: both rosters, live points, win probability + history
   - GET /api/leagues/{league_id}/trade-eval?give=..&get=.. -> trade balance with
         live-market pick values, consolidation weighting and per-team tax
   - GET /api/leagues/{league_id}/trade-targets -> who to target at your weak
@@ -42,7 +40,6 @@ import opportunity
 import projections
 import valuation
 import lineup as lineup_logic
-import live
 from config import (
     LEAGUES, SLEEPER_USERNAME, POSITION_CAPS, PROTECTED_PICK_ROUNDS, UNTOUCHABLE,
 )
@@ -480,8 +477,7 @@ def get_weekly_matchups(league_id: str):
     plus how tough that opponent's defense has been against that
     position recently - e.g. 'Khalif Raymond vs. LAR - Tough matchup'.
     Computed from raw stats + a free NFL schedule source, independent
-    of Sleeper and FantasyCalc. (For your actual fantasy head-to-head,
-    see /live-matchup.)
+    of Sleeper and FantasyCalc.
     """
     if league_id not in _league_lookup:
         raise HTTPException(404, "Unknown league")
@@ -510,92 +506,6 @@ def get_weekly_matchups(league_id: str):
         "label": _league_lookup[league_id],
         "week": pool["week"],
         "players": [trim(p) for p in starters + bench if p.get("position") in defense_rankings.RELEVANT_POSITIONS],
-    }
-
-
-# ----------------------------------------------------------------------
-# Live head-to-head
-# ----------------------------------------------------------------------
-
-def _team_name(users_by_id: dict, roster: dict) -> str:
-    user = users_by_id.get(roster.get("owner_id")) or {}
-    return (user.get("metadata") or {}).get("team_name") or user.get("display_name") or f"Team {roster.get('roster_id')}"
-
-
-@app.get("/api/leagues/{league_id}/live-matchup")
-def get_live_matchup(league_id: str):
-    """
-    Your actual fantasy opponent this week, both rosters with live
-    points, who has finished / is playing / is yet to play, projected
-    finals, win probability and its history (for a sparkline). The same
-    payload drives the Lineup HQ scoreboard and the TV overlay page.
-    """
-    if league_id not in _league_lookup:
-        raise HTTPException(404, "Unknown league")
-
-    league_info = sleeper.get_league(league_id)
-    scoring_settings = league_info.get("scoring_settings") or {}
-    state = sleeper.get_nfl_state()
-    season, week = state["season"], state["week"]
-
-    my_roster, all_rosters, users_by_id = _find_my_roster(league_id)
-    players = sleeper.get_players_cached()
-    rosters_by_id = {r["roster_id"]: r for r in all_rosters}
-
-    matchups = sleeper.get_matchups(league_id, week)
-    mine = next((m for m in matchups if m.get("roster_id") == my_roster["roster_id"]), None)
-    if mine is None or mine.get("matchup_id") is None:
-        return {"league_id": league_id, "label": _league_lookup[league_id], "week": week, "no_matchup": True}
-    opp = next(
-        (m for m in matchups if m.get("matchup_id") == mine["matchup_id"] and m.get("roster_id") != mine["roster_id"]),
-        None,
-    )
-
-    slots = [p for p in (league_info.get("roster_positions") or []) if p != "BN"]
-    game_states = nfl_schedule.get_game_states(season, week)
-    schedule = nfl_schedule.get_week_schedule(season, week)
-    proj_by_pid = sleeper.get_projections(season, week)
-
-    # Expected points per starter: projection, falling back to trailing
-    # production when there isn't one.
-    expected_by_pid = {}
-    all_starters = (mine.get("starters") or []) + ((opp or {}).get("starters") or [])
-    for pid in all_starters:
-        proj = projections.projected_points(proj_by_pid.get(pid), scoring_settings)
-        recent = scoring.recent_avg_points(pid, season, week, scoring_settings)
-        expected_by_pid[pid], _ = projections.blend_expected(proj, recent)
-
-    teams = {(players.get(pid) or {}).get("team") for pid in all_starters}
-    bye_teams = {t for t in teams if t and schedule and t not in schedule}
-
-    me_sum, me_rem, me_var = live.side_summary(mine, players, slots, expected_by_pid, game_states, bye_teams)
-    me_sum["team_name"] = _team_name(users_by_id, my_roster)
-    me_sum["roster_id"] = my_roster["roster_id"]
-
-    if opp is None:
-        return {"league_id": league_id, "label": _league_lookup[league_id], "week": week, "no_matchup": True}
-
-    opp_roster = rosters_by_id.get(opp["roster_id"]) or {"roster_id": opp["roster_id"]}
-    opp_sum, opp_rem, opp_var = live.side_summary(opp, players, slots, expected_by_pid, game_states, bye_teams)
-    opp_sum["team_name"] = _team_name(users_by_id, opp_roster)
-    opp_sum["roster_id"] = opp["roster_id"]
-
-    prob = live.win_probability(me_sum["points"], me_rem, me_var, opp_sum["points"], opp_rem, opp_var)
-    pct = round(prob * 100, 1)
-    history = live.record_history(league_id, week, pct)
-
-    return {
-        "league_id": league_id,
-        "label": _league_lookup[league_id],
-        "league_name": league_info.get("name"),
-        "week": week,
-        "me": me_sum,
-        "opponent": opp_sum,
-        "win_prob": pct,
-        "margin": round(me_sum["points"] - opp_sum["points"], 2),
-        "headline": live.need_line(me_sum, opp_sum),
-        "history": history,
-        "updated_at": int(time.time()),
     }
 
 
@@ -842,6 +752,11 @@ def get_team_needs(league_id: str):
 # ----------------------------------------------------------------------
 # Trades
 # ----------------------------------------------------------------------
+
+def _team_name(users_by_id: dict, roster: dict) -> str:
+    user = users_by_id.get(roster.get("owner_id")) or {}
+    return (user.get("metadata") or {}).get("team_name") or user.get("display_name") or f"Team {roster.get('roster_id')}"
+
 
 def _normalize(text: str) -> str:
     return "".join(ch for ch in (text or "").lower() if ch.isalnum() or ch == " ").strip()

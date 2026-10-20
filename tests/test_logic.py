@@ -5,14 +5,12 @@ Unit tests for the pure decision logic (no network, no FastAPI needed):
 """
 import os
 import sys
-import tempfile
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
 import defense_rankings  # noqa: E402
 import lineup  # noqa: E402
-import live  # noqa: E402
 import projections  # noqa: E402
 import sleeper_client as sleeper  # noqa: E402
 import nfl_schedule  # noqa: E402
@@ -314,40 +312,6 @@ class Trades(unittest.TestCase):
         self.assertEqual(valuation.suggest_package(10**6, assets), (None, None))
 
 
-class WinProbability(unittest.TestCase):
-    def test_extremes_and_symmetry(self):
-        self.assertEqual(live.win_probability(100, 0, 0, 90, 0, 0), 1.0)
-        self.assertEqual(live.win_probability(90, 0, 0, 100, 0, 0), 0.0)
-        self.assertEqual(live.win_probability(100, 0, 0, 100, 0, 0), 0.5)
-        self.assertAlmostEqual(live.win_probability(100, 20, 50, 100, 20, 50), 0.5)
-
-    def test_more_to_play_means_less_certainty(self):
-        early = live.win_probability(60, 60, 200, 50, 60, 200)
-        late = live.win_probability(110, 10, 20, 100, 10, 20)
-        self.assertLess(early, late)  # same 10-pt lead is safer when little is left
-        self.assertGreater(early, 0.5)
-
-    def test_side_summary_statuses_and_remaining(self):
-        players = {"1": {"team": "AAA", "position": "QB", "full_name": "Q One"},
-                   "2": {"team": "BBB", "position": "WR", "full_name": "W Two"},
-                   "3": {"team": "CCC", "position": "RB", "full_name": "R Three"},
-                   "4": {"team": "DDD", "position": "TE", "full_name": "T Four"}}
-        entry = {"starters": ["1", "2", "3", "4"], "starters_points": [20.0, 5.0, 0.0, 0.0], "points": 25.0}
-        states = {"AAA": {"state": "post", "progress": 1.0, "detail": "Final"},
-                  "BBB": {"state": "in", "progress": 0.5, "detail": "Q3 8:00"},
-                  "CCC": {"state": "pre", "progress": 0.0, "detail": "Sun 4:25 PM"}}
-        summary, rem_mean, rem_var = live.side_summary(
-            entry, players, ["QB", "WR", "RB", "TE"], {"1": 18, "2": 12, "3": 10, "4": 8}, states, {"DDD"})
-        by = {r["name"]: r for r in summary["players"]}
-        self.assertEqual(by["Q One"]["status"], "final")
-        self.assertEqual(by["W Two"]["status"], "live")
-        self.assertEqual(by["R Three"]["status"], "upcoming")
-        self.assertEqual(by["T Four"]["status"], "bye")
-        self.assertAlmostEqual(rem_mean, 6.0 + 10.0)  # half of 12 + all of 10
-        self.assertEqual(summary["projected_final"], 41.0)
-        self.assertEqual((summary["done"], summary["playing_now"], summary["yet_to_play"]), (2, 1, 1))
-
-
 class HttpCache(unittest.TestCase):
     def test_stats_download_is_cached(self):
         calls = []
@@ -395,16 +359,6 @@ class HttpCache(unittest.TestCase):
             self.assertEqual(sleeper.get_projections("2026", 6), {})
         finally:
             sleeper._session = orig
-
-
-class WinHistory(unittest.TestCase):
-    def test_history_records_and_dedupes(self):
-        live.DATA_DIR = type(live.DATA_DIR)(tempfile.mkdtemp())
-        live._history.clear()
-        a = live.record_history("L", 1, 50.0)
-        b = live.record_history("L", 1, 50.1)  # same value, inside the gap -> not appended
-        c = live.record_history("L", 1, 60.0)  # moved -> appended
-        self.assertEqual((len(a), len(b), len(c)), (1, 1, 2))
 
 
 if __name__ == "__main__":

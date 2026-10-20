@@ -1,10 +1,8 @@
 const content = document.getElementById("content");
 const tabsEl = document.getElementById("leagueTabs");
 const refreshBtn = document.getElementById("refreshBtn");
-const overlayLink = document.getElementById("overlayLink");
 
 const out = {
-  scoreboard: document.getElementById("scoreboardOutput"),
   advice: document.getElementById("adviceOutput"),
   waiver: document.getElementById("waiverOutput"),
   drops: document.getElementById("dropCandidatesOutput"),
@@ -20,7 +18,6 @@ let activeLeagueId = null;
 // have already switched away from must NOT overwrite the panels, so
 // each render checks that its token is still the current one.
 let viewToken = 0;
-let livePoll = null;
 
 function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, ch => (
@@ -113,94 +110,6 @@ function table(headers, rows, cls = "") {
   if (!rows.length) return "";
   const head = headers.map(h => `<th>${esc(h)}</th>`).join("");
   return `<div class="table-wrap"><table class="data ${cls}"><thead><tr>${head}</tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
-}
-
-// ---------------------------------------------------------------- scoreboard
-
-function sparkline(history) {
-  if (!history || history.length < 2) return '<p class="hint">Win-probability trend appears as the week plays out.</p>';
-  const w = 300, h = 56, pad = 4;
-  const xs = history.map((_, i) => pad + (i / (history.length - 1)) * (w - pad * 2));
-  const ys = history.map(pt => pad + (1 - pt.p / 100) * (h - pad * 2));
-  const pts = xs.map((x, i) => `${x.toFixed(1)},${ys[i].toFixed(1)}`).join(" ");
-  const mid = (pad + (h - pad * 2) / 2).toFixed(1);
-  const last = history[history.length - 1].p;
-  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Win probability over time, now ${last}%">
-    <line x1="0" x2="${w}" y1="${mid}" y2="${mid}" class="spark-mid"/>
-    <polyline points="${pts}" class="spark-line ${last >= 50 ? "up" : "down"}"/>
-  </svg>`;
-}
-
-function statusPill(p) {
-  const text = { final: "Done", live: "Live", upcoming: "Later", bye: "Bye" }[p.status] || "";
-  return `<span class="pill pill-${esc(p.status)}">${text}</span>`;
-}
-
-function playerCell(p) {
-  if (!p) return "<td></td><td></td>";
-  const exp = p.status === "final" || p.status === "bye" ? "" : ` <span class="hint">proj ${fmt(p.expected)}</span>`;
-  return `<td>${esc(p.name)}${injuryBadge(p)} ${statusPill(p)}${exp}</td><td class="num">${fmt(p.points, 2)}</td>`;
-}
-
-function renderScoreboard(d) {
-  if (d.no_matchup) return "<p>No head-to-head this week (bye or schedule not set yet).</p>";
-  const me = d.me, opp = d.opponent;
-  const leading = d.margin > 0, tied = d.margin === 0;
-  const meCls = tied ? "" : (leading ? "lead" : "trail");
-  const oppCls = tied ? "" : (leading ? "trail" : "lead");
-
-  const rows = [];
-  const n = Math.max(me.players.length, opp.players.length);
-  for (let i = 0; i < n; i++) {
-    const a = me.players[i], b = opp.players[i];
-    rows.push(`<tr><td class="slot">${esc((a || b).slot || "")}</td>${playerCell(a)}${playerCell(b)}</tr>`);
-  }
-
-  return `
-    <div class="scoreboard">
-      <div class="side ${meCls}">
-        <div class="team">${esc(me.team_name)}</div>
-        <div class="score">${fmt(me.points, 2)}</div>
-        <div class="hint">proj ${fmt(me.projected_final)} · ${me.yet_to_play} to play</div>
-      </div>
-      <div class="vs">
-        <div class="winprob">${fmt(d.win_prob, 0)}%</div>
-        <div class="hint">win prob</div>
-      </div>
-      <div class="side ${oppCls}">
-        <div class="team">${esc(opp.team_name)}</div>
-        <div class="score">${fmt(opp.points, 2)}</div>
-        <div class="hint">proj ${fmt(opp.projected_final)} · ${opp.yet_to_play} to play</div>
-      </div>
-    </div>
-    <div class="probbar"><div class="probfill" style="width:${Math.max(0, Math.min(100, d.win_prob))}%"></div></div>
-    ${d.headline ? `<p class="headline">${esc(d.headline)}</p>` : ""}
-    ${sparkline(d.history)}
-    <div class="table-wrap"><table class="data compare">
-      <thead><tr><th></th><th>You</th><th class="num">Pts</th><th>Opponent</th><th class="num">Pts</th></tr></thead>
-      <tbody>${rows.join("")}</tbody>
-    </table></div>`;
-}
-
-function loadScoreboard(token, leagueId) {
-  return panel(token, out.scoreboard, `/api/leagues/${leagueId}/live-matchup`, renderScoreboard, "the matchup");
-}
-
-// Quietly refresh the scoreboard without the "Loading..." flash.
-async function refreshScoreboardQuietly(token, leagueId) {
-  try {
-    const data = await fetchJSON(`/api/leagues/${leagueId}/live-matchup`);
-    if (token !== viewToken) return;
-    out.scoreboard.innerHTML = renderScoreboard(data);
-  } catch (_) { /* keep what is on screen */ }
-}
-
-function startLivePolling(token, leagueId) {
-  if (livePoll) clearInterval(livePoll);
-  livePoll = setInterval(() => {
-    if (document.hidden || token !== viewToken) return;
-    refreshScoreboardQuietly(token, leagueId);
-  }, 30000);
 }
 
 // ---------------------------------------------------------------- recommendations / waivers
@@ -420,18 +329,15 @@ function renderNflMatchups(data) {
 
 async function loadLeagueView(leagueId) {
   const token = ++viewToken;
-  overlayLink.href = `overlay.html?league=${encodeURIComponent(leagueId)}`;
   content.innerHTML = '<p class="loading">Loading...</p>';
 
   // Everything loads in parallel; each panel renders independently and
   // only if this is still the league on screen.
-  loadScoreboard(token, leagueId);
   loadAdvice(token, leagueId);
   panel(token, out.drops, `/api/leagues/${leagueId}/drop-candidates`, renderDrops, "drop candidates");
   panel(token, out.needs, `/api/leagues/${leagueId}/team-needs`, renderNeeds, "team needs");
   panel(token, out.tradeTargets, `/api/leagues/${leagueId}/trade-targets`, renderTargets, "trade targets");
   out.tradeEval.innerHTML = "";
-  startLivePolling(token, leagueId);
 
   try {
     const data = await fetchJSON(`/api/leagues/${leagueId}/matchups`);

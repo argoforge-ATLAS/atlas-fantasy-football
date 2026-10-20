@@ -19,7 +19,7 @@ _session = requests.Session()
 # several endpoints at once and each one used to re-fetch the same
 # league/roster/stat data; a few seconds of caching collapses that
 # into one request per resource without making anything stale enough
-# to matter (live scoring uses its own, shorter TTL).
+# to matter.
 _http_cache = {}  # (path) -> (fetched_at, data)
 _http_lock = threading.Lock()
 
@@ -62,13 +62,6 @@ def get_rosters(league_id: str):
 
 def get_league_users(league_id: str):
     return _get(f"/league/{league_id}/users", ttl=300)
-
-
-def get_matchups(league_id: str, week: int, ttl: float = 15):
-    """Both sides of every head-to-head in the league for one week,
-    with live points. Short TTL so a polling overlay stays fresh
-    without hammering Sleeper."""
-    return _get(f"/league/{league_id}/matchups/{week}", ttl=ttl)
 
 
 def get_traded_picks(league_id: str):

@@ -8,7 +8,6 @@ End-to-end check of every API route against a fake 10-team league
 import os
 import random
 import sys
-import tempfile
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
@@ -23,7 +22,6 @@ except Exception as exc:  # fastapi missing
 if HAVE_APP:
     import fantasycalc_client
     import keeper_eligibility
-    import live
     import nfl_schedule
     import sleeper_client as sleeper
 
@@ -126,25 +124,13 @@ class EndpointSmoke(unittest.TestCase):
             {"player_id": by_team["MIA"][3], "count": 900}])
         patch(sleeper, "get_projections", lambda season, week: {
             pid: {"rec_yd": 70, "rec": 6} for pid in by_team["SEA"][3:5]})
-        patch(sleeper, "get_matchups", lambda lid, week, ttl=15: [
-            {"roster_id": 1, "matchup_id": 1, "points": 55.5, "starters": cls.rosters[0]["starters"],
-             "starters_points": [12.0, 0.0, 9.0, 8.5, 6.0, 4.0, 10.0, 6.0, 0.0], "players_points": {}},
-            {"roster_id": 2, "matchup_id": 1, "points": 61.2, "starters": cls.rosters[1]["starters"],
-             "starters_points": [20.0, 10.0, 3.0, 8.2, 6.0, 4.0, 5.0, 5.0, 0.0], "players_points": {}}])
         patch(fantasycalc_client, "get_values_by_sleeper_id",
               lambda num_qbs, num_teams, ppr, is_dynasty=False: (cls.fc_calls.append(is_dynasty) or fc))
         sched = {}
         for a, b in zip(TEAMS[0::2], TEAMS[1::2]):
             sched[a], sched[b] = b, a
         patch(nfl_schedule, "get_week_schedule", lambda season, week: sched)
-        patch(nfl_schedule, "get_game_states", lambda season, week: {
-            t: {"state": s, "progress": pr, "detail": d} for t, (s, pr, d) in {
-                # SF deliberately absent: a game ESPN has no state for counts as not started.
-                "KC": ("post", 1.0, "Final"),
-                "DAL": ("in", 0.5, "Q3 8:00"), "PHI": ("in", 0.5, "Q3 8:00")}.items()})
         patch(keeper_eligibility, "get_keeper_eligible_ids", lambda lid, ids: set(list(ids)[:1]))
-        live.DATA_DIR = type(live.DATA_DIR)(tempfile.mkdtemp())
-        live._history.clear()
         main._memo_data.clear()
 
     @classmethod
@@ -196,20 +182,6 @@ class EndpointSmoke(unittest.TestCase):
         for row in n:
             self.assertTrue(1 <= row["rank"] <= row["out_of"])
             self.assertIn(row["label"], ("Strength", "Weakness", "Average"))
-
-    def test_live_matchup(self):
-        d = main.get_live_matchup(LEAGUE_ID)
-        self.assertEqual(d["me"]["team_name"], "Team 1")
-        self.assertEqual(d["opponent"]["team_name"], "Team 2")
-        self.assertEqual(d["me"]["points"], 55.5)
-        self.assertEqual(d["margin"], round(55.5 - 61.2, 2))
-        self.assertTrue(0 <= d["win_prob"] <= 100)
-        self.assertEqual(len(d["me"]["players"]), 9)
-        statuses = {p["status"] for p in d["me"]["players"] + d["opponent"]["players"]}
-        self.assertTrue({"final", "live", "upcoming"} <= statuses)
-        self.assertTrue(d["history"] and d["headline"])
-        d2 = main.get_live_matchup(LEAGUE_ID)
-        self.assertGreaterEqual(len(d2["history"]), 1)
 
     def test_trade_eval_by_name_and_pick(self):
         r = main.get_trade_eval(LEAGUE_ID, give="SF Receiver One,2027 R1", get="KC Receiver One")
@@ -271,7 +243,7 @@ class EndpointSmoke(unittest.TestCase):
 
     def test_unknown_league_404s(self):
         from fastapi import HTTPException
-        for fn in (main.get_recommendations, main.get_live_matchup, main.get_trade_targets, main.get_team_needs):
+        for fn in (main.get_recommendations, main.get_trade_targets, main.get_team_needs):
             with self.assertRaises(HTTPException):
                 fn("nope")
 
