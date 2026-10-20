@@ -1013,9 +1013,23 @@ def get_trade_targets(league_id: str):
 # In Docker main.py sits at /app/ next to /app/frontend; in a repo
 # checkout it is backend/main.py with ../frontend beside it.
 _here = Path(__file__).resolve().parent
-_frontend_dir = next(
-    (d for d in (Path(os.environ.get("FRONTEND_DIR", "")), _here / "frontend", _here.parent / "frontend") if d.is_dir()),
-    _here / "frontend",
-)
+
+
+def _find_frontend_dir() -> Path:
+    # Path("") is "." (the current directory), so an unset FRONTEND_DIR
+    # must be skipped explicitly - otherwise the app serves its own
+    # source folder instead of the frontend.
+    candidates = []
+    override = os.environ.get("FRONTEND_DIR", "").strip()
+    if override:
+        candidates.append(Path(override))
+    candidates += [_here / "frontend", _here.parent / "frontend"]
+    for d in candidates:
+        if d.is_dir() and (d / "index.html").is_file():
+            return d
+    return _here / "frontend"
+
+
+_frontend_dir = _find_frontend_dir()
 if _frontend_dir.is_dir():
     app.mount("/", StaticFiles(directory=str(_frontend_dir), html=True), name="frontend")

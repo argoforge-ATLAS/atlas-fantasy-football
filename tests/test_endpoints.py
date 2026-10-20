@@ -237,6 +237,28 @@ class EndpointSmoke(unittest.TestCase):
         self.assertTrue(m["players"])
         self.assertTrue(main.get_lineup(LEAGUE_ID)["starters"])
 
+    def test_frontend_dir_is_never_the_working_directory(self):
+        # Regression: Path("") is ".", so an unset FRONTEND_DIR once made the
+        # app serve its own source folder (no home page, and /main.py exposed).
+        from pathlib import Path
+        old_cwd, old_env = os.getcwd(), os.environ.pop("FRONTEND_DIR", None)
+        try:
+            os.chdir(Path(main.__file__).resolve().parent)  # like WORKDIR /app
+            for value in (None, "", "   "):
+                if value is None:
+                    os.environ.pop("FRONTEND_DIR", None)
+                else:
+                    os.environ["FRONTEND_DIR"] = value
+                d = main._find_frontend_dir()
+                self.assertTrue((d / "index.html").is_file())
+                self.assertFalse((d / "main.py").exists())
+        finally:
+            os.chdir(old_cwd)
+            if old_env is not None:
+                os.environ["FRONTEND_DIR"] = old_env
+            else:
+                os.environ.pop("FRONTEND_DIR", None)
+
     def test_unknown_league_404s(self):
         from fastapi import HTTPException
         for fn in (main.get_recommendations, main.get_live_matchup, main.get_trade_targets, main.get_team_needs):
