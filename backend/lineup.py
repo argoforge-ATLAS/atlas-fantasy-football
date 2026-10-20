@@ -279,3 +279,85 @@ def build_fallback_plan(adds: list, drops: list, position_counts: dict, caps: di
         )
         r["warning"] = note if not r.get("warning") else f"{r['warning']}; {note}"
     return rows
+
+
+# ------------------------------------------------------------ empty slots
+
+def build_slot_fixes(adds: list, roster: list, needed_positions, roster_full: bool, dynasty: bool,
+                     exclude_add_ids=frozenset(), exclude_drop_ids=frozenset()):
+    """
+    One row per empty lineup slot the waiver plans didn't already fill
+    (e.g. your only DEF is on a bye). A full lineup isn't optional, so
+    unlike the other plans there is no gain bar: the best healthy free
+    agent at that position is paired with a drop, and if the roster has
+    an open spot, with no drop at all.
+
+    `roster` is every player you could cut: healthy starters you need
+    this week, IR/taxi stashes and anyone the caller marks `protected`
+    (young + injured, young upside, rising role) must already be left
+    out. The drop is, in order of preference:
+      * a same-position player (usually the one leaving the hole - a
+        bye-week DEF is worth nothing to a dynasty roster),
+      * otherwise the least valuable player (lowest keep score),
+      * never keeper-eligible unless nothing else is left (flagged).
+    Dropping someone held for market value is allowed but flagged.
+    """
+    rows = []
+    used_adds, used_drops = set(exclude_add_ids), set(exclude_drop_ids)
+
+    for pos in sorted(needed_positions):
+        options = [
+            a for a in adds
+            if a.get("position") == pos
+            and a.get("injury_status") not in UNADDABLE_STATUSES
+            and not a.get("on_bye")
+            and a.get("id") not in used_adds
+        ]
+        if not options:
+            continue
+        add = max(options, key=lambda a: add_score(a, dynasty))
+
+        drop = None
+        if roster_full:
+            candidates = [p for p in roster if p["id"] not in used_drops]
+            if not candidates:
+                continue
+            candidates.sort(key=lambda p: (
+                bool(p.get("keeper_eligible")),
+                p.get("position") != pos,
+                p.get("keep_score", 0.0),
+            ))
+            drop = candidates[0]
+
+        add_pts = effective_points(add) or 0.0
+        drop_pts = (effective_points(drop) or 0.0) if drop else 0.0
+
+        warnings = [f"Fills your empty {pos} slot this week"]
+        if drop is None:
+            warnings.append("You have an open roster spot, so no drop is needed")
+        else:
+            if drop.get("keeper_eligible"):
+                warnings.append("Dropping costs keeper eligibility for good")
+            if drop.get("hold"):
+                value = drop.get("fantasycalc_value")
+                warnings.append(
+                    f"{drop['name']} is held for market value"
+                    + (f" (FantasyCalc {round(value)})" if value else "")
+                    + " - trading him first is better if anyone will take him"
+                )
+
+        used_adds.add(add["id"])
+        if drop:
+            used_drops.add(drop["id"])
+        rows.append({
+            "add": {k: add.get(k) for k in ("id", "name", "position", "team", "injury_status", "expected_points", "fantasycalc_value", "age", "add_count_48h")},
+            "drop": {k: drop.get(k) for k in ("id", "name", "position", "team", "expected_points", "fantasycalc_value", "age", "keeper_eligible")} if drop else None,
+            "gain": round(add_pts - drop_pts, 1),
+            "long_term": False,
+            "fills_slot": True,
+            "warning": "; ".join(warnings),
+        })
+
+    for i, r in enumerate(rows, start=1):
+        r["claim_order"] = i
+    return rows

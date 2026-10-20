@@ -140,14 +140,15 @@ function renderAdvice(data) {
   return html;
 }
 
-function planRows(plan) {
+// `offset` continues the claim numbering after rows shown above this table.
+function planRows(plan, offset = 0) {
   return plan.map(r => `
     <tr>
-      <td class="num"><strong>${esc(r.claim_order)}</strong></td>
+      <td class="num"><strong>${esc(r.claim_order + offset)}</strong></td>
       <td><span class="label-strength">ADD</span> <strong>${esc(r.add.name)}</strong>
         <div class="hint">${esc(r.add.position)} · proj ${fmt(r.add.expected_points)}${r.add.injury_status ? " · " + esc(r.add.injury_status) : ""}</div></td>
-      <td><span class="label-weakness">DROP</span> <strong>${esc(r.drop.name)}</strong>
-        <div class="hint">${esc(r.drop.position)} · proj ${fmt(r.drop.expected_points)}</div></td>
+      <td>${r.drop ? `<span class="label-weakness">DROP</span> <strong>${esc(r.drop.name)}</strong>
+        <div class="hint">${esc(r.drop.position)} · proj ${fmt(r.drop.expected_points)}</div>` : '<span class="hint">No drop needed</span>'}</td>
       <td class="num">${r.fills_slot ? "fills slot" : (r.long_term ? "long-term" : "+" + fmt(r.gain))}</td>
     </tr>
     ${r.warning ? `<tr class="warn-row"><td></td><td colspan="3" class="hint">⚠ ${esc(r.warning)}</td></tr>` : ""}`);
@@ -156,12 +157,19 @@ function planRows(plan) {
 function renderWaiverPlan(data) {
   const plan = data.waiver_plan || [];
   const fallback = data.fallback_plan || [];
+  const fixes = data.slot_fixes || [];
   const open = (data.open_slots || []).length
     ? `<p class="hint">Empty lineup slot this week: <strong>${esc(data.open_slots.join(", "))}</strong>.</p>` : "";
   let html = open;
+  if (fixes.length) {
+    html += "<h3>Fill your empty slot - claim this first</h3>"
+      + "<p class=\"hint\">You have to start a full lineup, so this one isn't optional. Young injured players and rising roles are never the drop.</p>"
+      + table(["#", "Add", "Drop", "Gain"], planRows(fixes), "plan");
+  }
   if (plan.length) {
-    html += table(["#", "Add", "Drop", "Gain"], planRows(plan), "plan");
-  } else {
+    if (fixes.length) html += "<h3>Other moves</h3>";
+    html += table(["#", "Add", "Drop", "Gain"], planRows(plan, fixes.length), "plan");
+  } else if (!fixes.length) {
     html += "<p>No safe add/drop moves this week - everyone you could cut is held for long-term value.</p>";
   }
   if (fallback.length) {

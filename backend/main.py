@@ -457,6 +457,18 @@ def get_recommendations(league_id: str):
         exclude_add_ids={r["add"]["id"] for r in waiver_plan},
         exclude_drop_ids={r["drop"]["id"] for r in waiver_plan},
     )
+    # An empty lineup slot neither plan filled still needs a body, even if
+    # that means cutting someone the plans above won't touch.
+    planned = waiver_plan + fallback_plan
+    slot_fixes = lineup_logic.build_slot_fixes(
+        adds=pool["waiver_candidates"],
+        roster=_slot_fix_drop_pool(league_id, pool, swap_suggestions, drops),
+        needed_positions=needed - {r["add"]["position"] for r in planned if r.get("fills_slot")},
+        roster_full=_roster_is_full(pool),
+        dynasty=dynasty,
+        exclude_add_ids={r["add"]["id"] for r in planned},
+        exclude_drop_ids={r["drop"]["id"] for r in planned},
+    )
 
     return {
         "league_id": league_id,
@@ -464,10 +476,53 @@ def get_recommendations(league_id: str):
         "dynasty": dynasty,
         "swap_suggestions": swap_suggestions,
         "top_waivers": ranked_waivers,
+        "slot_fixes": slot_fixes,
         "waiver_plan": waiver_plan,
         "fallback_plan": fallback_plan,
         "open_slots": sorted(needed),
     }
+
+
+def _roster_is_full(pool: dict) -> bool:
+    """Every active roster spot taken (IR and taxi players don't count),
+    so an add needs a drop."""
+    roster = pool["my_roster"]
+    stashed = set(roster.get("reserve") or []) | set(roster.get("taxi") or [])
+    active = [pid for pid in (roster.get("players") or []) if pid not in stashed]
+    return len(active) >= len(pool["league_info"].get("roster_positions") or [])
+
+
+def _slot_fix_drop_pool(league_id: str, pool: dict, swap_suggestions: list, drops: list) -> list:
+    """Everyone you could cut to fill an empty lineup slot: not a healthy
+    starter you need this week (or a bench player moving into the
+    lineup), not an IR/taxi stash, and not a long-term bet the hold rules
+    protect (young + injured, young upside, rising role). Players held
+    only for market value stay in, marked `hold` so the drop is flagged."""
+    roster = pool["my_roster"]
+    stashed = set(roster.get("reserve") or []) | set(roster.get("taxi") or [])
+    moving_in = {s["start"] for s in swap_suggestions if s.get("start")}
+    role_growing = {d["id"] for d in drops if d["verdict"] == "Hold - role growing"}
+    dynasty, floor = pool["dynasty"], pool["floor"]
+
+    out = []
+    for p in pool["starters"] + pool["bench"]:
+        is_starter = "slot" in p
+        if is_starter and not (p.get("bad_injury") or p.get("on_bye")):
+            continue
+        if p["id"] in stashed or p.get("injury_status") in STASH_STATUSES:
+            continue
+        if not is_starter and p["name"] in moving_in:
+            continue
+        hold = valuation.hold_reason(p, dynasty, floor)
+        if (hold and hold != lineup_logic.FALLBACK_HOLD_VERDICT) or p["id"] in role_growing:
+            continue
+        out.append(dict(p, hold=bool(hold), keep_score=valuation.keep_score(p, dynasty)))
+
+    if pool["league_info"].get("name") in KEEPER_RULE_LEAGUE_NAMES and out:
+        eligible = keeper_eligibility.get_keeper_eligible_ids(league_id, {p["id"] for p in out})
+        for p in out:
+            p["keeper_eligible"] = p["id"] in eligible
+    return out
 
 
 @app.get("/api/leagues/{league_id}/matchups")

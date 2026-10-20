@@ -260,6 +260,57 @@ class FallbackPlan(unittest.TestCase):
         self.assertIn("empty DEF slot", rows[0]["warning"])
 
 
+class SlotFixes(unittest.TestCase):
+    def roster(self):
+        # What main hands over: no healthy starters, stashes or protected players.
+        return [
+            P("ByeDEF", "DEF", 7.0, id="r1", slot="DEF", on_bye=True, keep_score=3.5),
+            P("BenchWR", "WR", 4.0, id="r2", keep_score=1.0),
+            P("OldTE", "TE", 3.0, id="r3", keep_score=6.0, hold=True, fantasycalc_value=1600),
+        ]
+
+    def adds(self):
+        return [P("StreamDEF", "DEF", 9.0, id="a1"), P("HurtDEF", "DEF", 12.0, id="a2", injury_status="Out"),
+                P("FreeWR", "WR", 10.0, id="a3")]
+
+    def test_bye_starter_at_the_same_position_is_the_drop(self):
+        rows = lineup.build_slot_fixes(self.adds(), self.roster(), {"DEF"}, roster_full=True, dynasty=True)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["add"]["id"], "a1")  # never an Out add
+        self.assertEqual(rows[0]["drop"]["id"], "r1")  # same position beats a cheaper WR
+        self.assertEqual(rows[0]["gain"], 9.0)  # a bye-week player is worth 0 this week
+        self.assertTrue(rows[0]["fills_slot"])
+        self.assertEqual(rows[0]["claim_order"], 1)
+
+    def test_otherwise_the_least_valuable_player(self):
+        roster = [p for p in self.roster() if p["id"] != "r1"]
+        rows = lineup.build_slot_fixes(self.adds(), roster, {"DEF"}, roster_full=True, dynasty=True)
+        self.assertEqual(rows[0]["drop"]["id"], "r2")
+
+    def test_open_roster_spot_needs_no_drop(self):
+        rows = lineup.build_slot_fixes(self.adds(), self.roster(), {"DEF"}, roster_full=False, dynasty=True)
+        self.assertIsNone(rows[0]["drop"])
+        self.assertIn("no drop is needed", rows[0]["warning"])
+
+    def test_keeper_eligible_last_and_market_holds_flagged(self):
+        roster = [P("Keeper", "WR", 1.0, id="k1", keep_score=0.1, keeper_eligible=True),
+                  P("OldTE", "TE", 3.0, id="r3", keep_score=6.0, hold=True, fantasycalc_value=1600)]
+        rows = lineup.build_slot_fixes(self.adds(), roster, {"DEF"}, roster_full=True, dynasty=True)
+        self.assertEqual(rows[0]["drop"]["id"], "r3")
+        self.assertIn("held for market value (FantasyCalc 1600)", rows[0]["warning"])
+        rows = lineup.build_slot_fixes(self.adds(), roster[:1], {"DEF"}, roster_full=True, dynasty=True)
+        self.assertIn("keeper eligibility", rows[0]["warning"])
+
+    def test_skips_used_players_and_positions_with_no_add(self):
+        rows = lineup.build_slot_fixes(self.adds(), self.roster(), {"DEF", "TE"}, roster_full=True, dynasty=True,
+                                       exclude_drop_ids={"r1"})
+        self.assertEqual([r["add"]["position"] for r in rows], ["DEF"])  # no TE free agent
+        self.assertNotEqual(rows[0]["drop"]["id"], "r1")
+        self.assertEqual(lineup.build_slot_fixes(self.adds(), self.roster(), {"DEF"}, True, True,
+                                                 exclude_add_ids={"a1"}), [])
+        self.assertEqual(lineup.build_slot_fixes(self.adds(), [], {"DEF"}, True, True), [])
+
+
 class Trades(unittest.TestCase):
     BOARD = {str(i): {"value": 10000 - i * 50, "overall_rank": i + 1} for i in range(300)}
 

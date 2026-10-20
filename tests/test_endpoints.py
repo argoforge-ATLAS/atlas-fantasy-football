@@ -219,6 +219,38 @@ class EndpointSmoke(unittest.TestCase):
             self.assertNotIn(row["drop"]["id"], safe_drops)
             self.assertNotEqual(row["drop"]["id"], self.young_hurt)  # young injured is never offered
 
+    def test_empty_slot_always_gets_a_claim(self):
+        # My DEF's team has no game this week and the bench has no DEF.
+        my_def = self.rosters[0]["players"][7]
+        old_team = self.players[my_def]["team"]
+        self.players[my_def]["team"] = "NYJ"  # not on the fake schedule = bye
+        main._memo_data.clear()
+        try:
+            rec = main.get_recommendations(OTHER_ID)
+            self.assertEqual(rec["open_slots"], ["DEF"])
+            rows = rec["slot_fixes"] + rec["waiver_plan"] + rec["fallback_plan"]
+            fills = [r for r in rows if r.get("fills_slot")]
+            self.assertTrue(fills, "an empty DEF slot must come with a DEF claim")
+            self.assertEqual(fills[0]["add"]["position"], "DEF")
+            self.assertIsNotNone(fills[0]["drop"])  # roster is full
+            for r in rec["slot_fixes"]:
+                self.assertNotEqual(r["drop"]["id"], self.young_hurt)
+            # With every scrub protected from the safe plan, the slot fix
+            # itself must step in.
+            pool = main._pool(OTHER_ID)
+            drop_pool = main._slot_fix_drop_pool(OTHER_ID, pool, main.lineup_logic.optimize_swaps(
+                pool["starters"], pool["bench"], main.SLOT_ELIGIBILITY), [])
+            ids = {p["id"] for p in drop_pool}
+            self.assertIn(my_def, ids)  # the bye DEF can be cut
+            self.assertNotIn(self.young_hurt, ids)  # young + injured never
+            self.assertNotIn(self.rosters[0]["players"][0], ids)  # healthy starter never
+            fix = main.lineup_logic.build_slot_fixes(
+                pool["waiver_candidates"], drop_pool, {"DEF"}, main._roster_is_full(pool), True)
+            self.assertEqual(fix[0]["drop"]["id"], my_def)
+        finally:
+            self.players[my_def]["team"] = old_team
+            main._memo_data.clear()
+
     def test_frontend_dir_is_never_the_working_directory(self):
         # Regression: Path("") is ".", so an unset FRONTEND_DIR once made the
         # app serve its own source folder (no home page, and /main.py exposed).
